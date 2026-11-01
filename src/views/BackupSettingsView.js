@@ -281,11 +281,11 @@ export class BackupSettingsView {
         return;
       }
       try {
-        LoadingOverlay.show('Testing connection to Google Gemini 2.5 Flash...');
+        LoadingOverlay.show('Testing connection to Google Gemini AI...');
         await testGeminiApiKey(candidateKey);
         await wardrobeDb.setSetting('geminiApiKey', candidateKey);
         LoadingOverlay.hide();
-        showToast('✓ Connected to Gemini 2.5 Flash & saved your API key!', 'success');
+        showToast('✓ Connection successful! Your Gemini API key has been saved.', 'success');
         await this.loadState();
         this.render();
       } catch (err) {

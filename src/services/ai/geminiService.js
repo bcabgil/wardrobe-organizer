@@ -516,7 +516,7 @@ export async function suggestTomorrowOutfits({
     return {
       engine: 'gemini',
       outfits: sanitizedOutfits,
-      message: `Styled ${sanitizedOutfits.length} look(s) with Google Gemini 2.5 Flash.`
+      message: `Styled ${sanitizedOutfits.length} look(s) with Google Gemini AI.`
     };
   } catch (err) {
     // Graceful fallback to 100% offline rule-based stylist
