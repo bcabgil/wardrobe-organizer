@@ -122,10 +122,24 @@ describe('Offline Stylist: Rule-Based Fashion AI Engine', () => {
     }
   });
 
-  it('T1-STY-05: adapts to occasion type (everyday, gym, dress-up)', async (ctx) => {
+  it('T1-STY-05: adapts to occasion type (everyday, gym, dress-up) and keeps wardrobes strictly independent', async (ctx) => {
     if (!stylistMod) return;
 
     const generate = stylistMod.generateOfflineOutfits || stylistMod.default?.generateOfflineOutfits;
+    const byId = Object.fromEntries(SAMPLE_WARDROBE.map((g) => [g.id, g]));
+
+    const everydayResult = generate({
+      garments: SAMPLE_WARDROBE,
+      occasion: 'everyday',
+      activeSeason: 'winter'
+    });
+    expect(everydayResult.outfits.length).toBeGreaterThanOrEqual(1);
+    for (const outfit of everydayResult.outfits) {
+      for (const id of outfit.garmentIds) {
+        expect(byId[id].type).toBe('everyday');
+      }
+    }
+
     const gymResult = generate({
       garments: SAMPLE_WARDROBE,
       occasion: 'gym',
@@ -136,6 +150,11 @@ describe('Offline Stylist: Rule-Based Fashion AI Engine', () => {
     const gymOutfit = gymResult.outfits[0];
     expect(gymOutfit.garmentIds).toContain('gym_top');
     expect(gymOutfit.garmentIds).toContain('gym_bot');
+    for (const outfit of gymResult.outfits) {
+      for (const id of outfit.garmentIds) {
+        expect(byId[id].type).toBe('gym');
+      }
+    }
 
     const dressResult = generate({
       garments: SAMPLE_WARDROBE,
@@ -145,6 +164,11 @@ describe('Offline Stylist: Rule-Based Fashion AI Engine', () => {
     expect(dressResult.outfits.length).toBeGreaterThanOrEqual(1);
     const dressOutfit = dressResult.outfits[0];
     expect(dressOutfit.garmentIds).toContain('dress_1');
+    for (const outfit of dressResult.outfits) {
+      for (const id of outfit.garmentIds) {
+        expect(byId[id].type).toBe('dress-up');
+      }
+    }
   });
 
   it('T1-STY-06: recommends outerwear when weather is cold (< 15°C) or rainy', async (ctx) => {

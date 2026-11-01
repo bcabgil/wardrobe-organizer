@@ -278,39 +278,35 @@ export function generateOfflineOutfits({
   const needOuterwear = includeOuterwear ? layeringEval.needOuterwear : false;
   const forbidOuterwear = includeOuterwear ? layeringEval.forbidOuterwear : true;
 
-  // 3. Filter by Active Season (activeSeason + 'all-season') and Temperature Compatibility
+  // 3. Filter by Occasion Wardrobe (strict independence: everyday, gym, dress-up), Active Season, and Temperature Compatibility
   const inSeasonGarments = cleanGarments.filter((g) => {
+    const garmentType = g.type || 'everyday';
+    if (garmentType !== occasion) return false;
     const seasonOk = !g.season || g.season === activeSeason || g.season === 'all-season';
     if (!seasonOk) return false;
     const role = inferLayerRole(g);
     return isGarmentTempCompatible(g, tempBand, role);
   });
 
-  // Locate anchor piece if requested (must be clean)
+  // Locate anchor piece if requested (must be clean and belong to the same occasion wardrobe)
   const anchorItem = anchorGarmentId
-    ? cleanGarments.find((g) => g.id === anchorGarmentId) || null
+    ? cleanGarments.find((g) => g.id === anchorGarmentId && (g.type || 'everyday') === occasion) || null
     : null;
 
-  const filterByCategory = (cat, strictOccasion = true) => {
-    const exactMatches = inSeasonGarments.filter(
-      (g) => g.category === cat && (!strictOccasion || g.type === occasion)
-    );
-    if (exactMatches.length > 0) return exactMatches;
+  const filterByCategory = (cat) => {
     return inSeasonGarments.filter((g) => g.category === cat);
   };
 
-  const allTops = filterByCategory('top', true);
+  const allTops = filterByCategory('top');
   // Partition tops into base layers (t-shirts, shirts) and mid layers (jumpers, sweaters, hoodies, cardigans)
   const baseTops = allTops.filter((g) => inferLayerRole(g) === 'base');
   const midTops = allTops.filter((g) => inferLayerRole(g) === 'mid');
 
-  const bottoms = filterByCategory('bottom', true);
-  const onePieces = inSeasonGarments.filter(
-    (g) => g.category === 'one-piece' && (g.type === occasion || occasion === 'dress-up')
-  );
-  const outerwearList = includeOuterwear ? filterByCategory('outerwear', false) : [];
-  const shoesList = filterByCategory('shoes', true);
-  const accessories = filterByCategory('accessory', false);
+  const bottoms = filterByCategory('bottom');
+  const onePieces = filterByCategory('one-piece');
+  const outerwearList = includeOuterwear ? filterByCategory('outerwear') : [];
+  const shoesList = filterByCategory('shoes');
+  const accessories = filterByCategory('accessory');
 
   const candidateCombinations = [];
 

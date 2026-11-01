@@ -66,17 +66,52 @@ export class TomorrowStylistView {
     await this.showRemainingCachedOutfits();
   }
 
-  getCleanInSeasonGarments() {
+  getCleanInSeasonGarments(targetOccasion = this.occasion) {
     const activeSeason = this.settings.activeSeason || 'winter';
     return this.garments.filter(
-      (g) => g.status === 'clean' && (!g.season || g.season === activeSeason || g.season === 'all-season')
+      (g) =>
+        g &&
+        g.status === 'clean' &&
+        (g.type || 'everyday') === targetOccasion &&
+        (!g.season || g.season === activeSeason || g.season === 'all-season')
     );
+  }
+
+  updateOccasionDependentControls() {
+    if (!this.container) return;
+    const cleanGarments = this.getCleanInSeasonGarments(this.occasion);
+    const activeSeason = this.settings.activeSeason || 'winter';
+
+    // If current anchor doesn't belong to the selected occasion wardrobe, reset it
+    if (this.anchorGarmentId && !cleanGarments.some((g) => g.id === this.anchorGarmentId)) {
+      this.anchorGarmentId = '';
+    }
+
+    const anchorSelect = this.container.querySelector('#stylist-anchor-select');
+    if (anchorSelect) {
+      const anchorOptionsHtml = cleanGarments
+        .map(
+          (g) =>
+            `<option value="${escapeHtml(g.id)}" ${this.anchorGarmentId === g.id ? 'selected' : ''}>${escapeHtml(g.name)} (${escapeHtml(g.category)})</option>`
+        )
+        .join('');
+      anchorSelect.innerHTML = `<option value="">✨ Let AI choose freely</option>${anchorOptionsHtml}`;
+    }
+
+    const subtitleEl = this.container.querySelector('.section-subtitle');
+    if (subtitleEl) {
+      subtitleEl.innerHTML = `AI-styled combinations from your <strong>${cleanGarments.length} clean ${escapeHtml(activeSeason)} ${escapeHtml(this.occasion)}</strong> pieces.`;
+    }
   }
 
   async render() {
     if (!this.container) return;
-    const cleanGarments = this.getCleanInSeasonGarments();
+    const cleanGarments = this.getCleanInSeasonGarments(this.occasion);
     const activeSeason = this.settings.activeSeason || 'winter';
+
+    if (this.anchorGarmentId && !cleanGarments.some((g) => g.id === this.anchorGarmentId)) {
+      this.anchorGarmentId = '';
+    }
 
     const anchorOptionsHtml = cleanGarments
       .map(
@@ -91,7 +126,7 @@ export class TomorrowStylistView {
       <section class="view-section stylist-view">
         <div class="section-header">
           <h2>What Should I Wear Tomorrow?</h2>
-          <p class="section-subtitle">AI-styled combinations from your <strong>${cleanGarments.length} clean ${escapeHtml(activeSeason)}</strong> pieces.</p>
+          <p class="section-subtitle">AI-styled combinations from your <strong>${cleanGarments.length} clean ${escapeHtml(activeSeason)} ${escapeHtml(this.occasion)}</strong> pieces.</p>
         </div>
 
         <!-- WEATHER BANNER -->
@@ -154,6 +189,7 @@ export class TomorrowStylistView {
         this.container
           .querySelectorAll('#stylist-occasion-pills .pill-btn')
           .forEach((b) => b.classList.toggle('active', b === btn));
+        this.updateOccasionDependentControls();
       });
     });
 
@@ -201,13 +237,16 @@ export class TomorrowStylistView {
     );
 
     if (lastActive && Array.isArray(lastActive.outfits) && lastActive.outfits.length > 0) {
-      // Keep only cached outfits where all pieces are still clean
-      const remainingOutfits = lastActive.outfits.filter(
-        (o) =>
-          Array.isArray(o.garmentIds) &&
-          o.garmentIds.length >= 1 &&
-          o.garmentIds.every((id) => cleanGarmentMap.has(id))
-      );
+      const targetOccasion = lastActive.occasion || this.occasion || 'everyday';
+      // Keep only cached outfits where all pieces are still clean AND belong to the same independent occasion wardrobe
+      const remainingOutfits = lastActive.outfits.filter((o) => {
+        if (!Array.isArray(o.garmentIds) || o.garmentIds.length < 1) return false;
+        const outfitOccasion = o.occasion || targetOccasion;
+        return o.garmentIds.every((id) => {
+          const g = cleanGarmentMap.get(id);
+          return g && (g.type || 'everyday') === outfitOccasion;
+        });
+      });
 
       if (remainingOutfits.length > 0) {
         const sortedRemaining = sortOutfitsByWearPreference(remainingOutfits, wearCounts);

@@ -36,12 +36,13 @@ export function computeOutfitCacheKey({
       (g) =>
         g &&
         g.status === 'clean' &&
+        (g.type || 'everyday') === occasion &&
         (!g.season || g.season === activeSeason || g.season === 'all-season') &&
         (includeOuterwear || g.category !== 'outerwear' || g.id === anchorGarmentId)
     )
     .map(
       (g) =>
-        `${g.id}:${g.category || ''}:${g.season || ''}:${g.tempSuitability || ''}:${g.layerRole || ''}:${g.type || ''}:${g.colorGroup || ''}:${(g.visualDescription || '').length}`
+        `${g.id}:${g.category || ''}:${g.season || ''}:${g.tempSuitability || ''}:${g.layerRole || ''}:${g.type || 'everyday'}:${g.colorGroup || ''}:${(g.visualDescription || '').length}`
     )
     .sort()
     .join(',');
@@ -503,11 +504,12 @@ export async function suggestTomorrowOutfits({
 } = {}) {
   const trimmedKey = String(apiKey || '').trim();
 
-  // Pre-filter candidate pool to clean + in-season garments (excluding outerwear unless includeOuterwear=true or anchored)
+  // Pre-filter candidate pool strictly to the selected occasion wardrobe (everyday, gym, dress-up are independent), clean + in-season garments (excluding outerwear unless includeOuterwear=true or anchored)
   const cleanInSeason = (garments || []).filter(
     (g) =>
       g &&
       g.status === 'clean' &&
+      (g.type || 'everyday') === occasion &&
       (!g.season || g.season === activeSeason || g.season === 'all-season') &&
       (includeOuterwear || g.category !== 'outerwear' || g.id === anchorGarmentId)
   );
