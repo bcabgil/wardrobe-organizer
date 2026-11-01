@@ -552,7 +552,8 @@ export async function suggestTomorrowOutfits({
       anchorGarmentId,
       weatherData,
       wearCounts,
-      includeOuterwear
+      includeOuterwear,
+      shuffle: Boolean(forceRefresh)
     });
     if (offlineResult.outfits && offlineResult.outfits.length > 0) {
       OUTFIT_SUGGESTION_CACHE.set(cacheKey, offlineResult);
@@ -609,6 +610,10 @@ export async function suggestTomorrowOutfits({
       ? '- Include outerwear/jackets when appropriate for the temperature or rain.'
       : '- Do NOT include jackets or coats (category="outerwear"), as the user uses their standard seasonal jacket separately. Focus on base + mid-layer tops, bottoms, one-pieces, shoes, and accessories.';
 
+    const refreshVariationClause = forceRefresh
+      ? `REFRESH REQUEST (Seed ${Date.now() % 10000}): Generate fresh, newly shuffled outfit pairings that explore different combinations from the inventory.`
+      : '';
+
     const prompt = [
       'You are a personal luxury fashion stylist.',
       `Create 2 to 3 complete, stylish outfit combinations for tomorrow from the user's CLEAN wardrobe inventory below.`,
@@ -621,6 +626,7 @@ export async function suggestTomorrowOutfits({
       outerwearClause,
       '- Pay close attention to each garment\'s fit, cut, and drape notes in `visualDescription` (captured from the user\'s on-body fit videos when `hasFitVideo` is true). Balance silhouettes across layers (e.g., pair relaxed/oversized jumpers with cleaner base layers or structured bottoms, and mention how the fit and proportions work on the body in `explanation` and `layeringTips`).',
       favoritePreferenceClause,
+      refreshVariationClause,
       anchorItem
         ? `CRITICAL REQUIREMENT: Every single suggested outfit MUST include the anchor garment ID "${anchorItem.id}" (${anchorItem.name}).`
         : 'Combine base/mid tops + bottoms (or one-piece) + optional shoes/accessories that harmonize in color and silhouette.',
@@ -633,7 +639,7 @@ export async function suggestTomorrowOutfits({
 
     const { data } = await callGeminiGenerateContent({
       apiKey: trimmedKey,
-      temperature: 0.5,
+      temperature: forceRefresh ? 0.85 : 0.5,
       responseSchema: OUTFIT_SUGGESTION_SCHEMA,
       contents: [{ parts: [{ text: prompt }] }]
     });
@@ -691,7 +697,8 @@ export async function suggestTomorrowOutfits({
       anchorGarmentId,
       weatherData,
       wearCounts,
-      includeOuterwear
+      includeOuterwear,
+      shuffle: Boolean(forceRefresh)
     });
     return {
       ...fallbackResult,

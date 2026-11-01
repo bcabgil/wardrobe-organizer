@@ -6,6 +6,7 @@
 
 import { wardrobeDb } from '../db/wardrobeDb.js';
 import { suggestTomorrowOutfits } from '../services/ai/geminiService.js';
+import { sortOutfitsByWearPreference, buildCombinationKey } from '../services/ai/offlineStylist.js';
 import { getTomorrowWeather } from '../services/weather/weatherService.js';
 import { MediaUrlManager, createSafeVideoPlayer } from '../utils/mediaUtils.js';
 import { escapeHtml, getCategoryIconSvg } from '../utils/domUtils.js';
@@ -30,15 +31,30 @@ export class TomorrowStylistView {
 
   async mount(container, params = {}) {
     this.container = container;
-    if (params.occasion) this.occasion = params.occasion;
-    if (params.anchor) this.anchorGarmentId = params.anchor;
 
-    const [garments, settings] = await Promise.all([
+    const [garments, settings, lastActive] = await Promise.all([
       wardrobeDb.getAllGarments(),
-      wardrobeDb.getSettings()
+      wardrobeDb.getSettings(),
+      wardrobeDb.getSetting('lastActiveOutfitSuggestions', null)
     ]);
     this.garments = garments || [];
     this.settings = settings || {};
+
+    if (lastActive && typeof lastActive === 'object') {
+      if (lastActive.occasion) this.occasion = lastActive.occasion;
+      if (typeof lastActive.includeOuterwear === 'boolean') {
+        this.includeOuterwear = lastActive.includeOuterwear;
+      }
+      if (lastActive.anchorGarmentId !== undefined) {
+        this.anchorGarmentId = lastActive.anchorGarmentId || '';
+      }
+      if (lastActive.weatherNote !== undefined) {
+        this.weatherNote = lastActive.weatherNote || '';
+      }
+    }
+
+    if (params.occasion) this.occasion = params.occasion;
+    if (params.anchor) this.anchorGarmentId = params.anchor;
 
     this.weather = await getTomorrowWeather({
       cityName: this.settings.location || '',
@@ -46,8 +62,8 @@ export class TomorrowStylistView {
     });
 
     await this.render();
-    // Automatically generate initial outfit suggestions
-    await this.generateSuggestions();
+    // Do NOT trigger new outfit generation when clicking "Tomorrow" tab — show remaining cached outfits
+    await this.showRemainingCachedOutfits();
   }
 
   getCleanInSeasonGarments() {
@@ -131,18 +147,17 @@ export class TomorrowStylistView {
       </section>
     `;
 
-    // Bind occasion pills
+    // Bind occasion pills (only updates selection; user clicks "Suggest Outfits for Tomorrow" to apply)
     this.container.querySelectorAll('#stylist-occasion-pills .pill-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         this.occasion = btn.dataset.val;
         this.container
           .querySelectorAll('#stylist-occasion-pills .pill-btn')
           .forEach((b) => b.classList.toggle('active', b === btn));
-        this.generateSuggestions({ forceRefresh: false });
       });
     });
 
-    // Bind anchor select, note & optional outerwear toggle
+    // Bind anchor select, note & optional outerwear toggle (only updates selection)
     this.container.querySelector('#stylist-anchor-select')?.addEventListener('change', (e) => {
       this.anchorGarmentId = e.target.value || '';
     });
@@ -153,16 +168,134 @@ export class TomorrowStylistView {
 
     this.container.querySelector('#stylist-include-outerwear')?.addEventListener('change', (e) => {
       this.includeOuterwear = Boolean(e.target.checked);
-      this.generateSuggestions({ forceRefresh: false });
     });
 
+    // "Suggest Outfits for Tomorrow" updates cached ideas according to the top options (e.g., Gym clothes or removing jacket)
     this.container.querySelector('#btn-generate-outfits')?.addEventListener('click', () => {
-      this.generateSuggestions({ forceRefresh: false });
+      this.applyOptionsToCachedOrSuggest();
     });
 
+    // "Refresh Ideas" calls API or matching heuristic to generate new/shuffled combinations
     this.container.querySelector('#btn-force-refresh-outfits')?.addEventListener('click', () => {
       this.generateSuggestions({ forceRefresh: true });
     });
+  }
+
+  /**
+   * Show remaining clean cached outfits when clicking the "Tomorrow" tab without triggering new generation
+   */
+  async showRemainingCachedOutfits() {
+    if (!this.container) return;
+    const outfitsMount = this.container.querySelector('#stylist-outfits-mount');
+    if (!outfitsMount) return;
+
+    const [latestGarments, wearCounts, lastActive] = await Promise.all([
+      wardrobeDb.getAllGarments(),
+      wardrobeDb.getCombinationWearCounts(),
+      wardrobeDb.getSetting('lastActiveOutfitSuggestions', null)
+    ]);
+    this.garments = latestGarments || [];
+
+    const cleanGarmentMap = new Map(
+      this.garments.filter((g) => g && g.status === 'clean').map((g) => [g.id, g])
+    );
+
+    if (lastActive && Array.isArray(lastActive.outfits) && lastActive.outfits.length > 0) {
+      // Keep only cached outfits where all pieces are still clean
+      const remainingOutfits = lastActive.outfits.filter(
+        (o) =>
+          Array.isArray(o.garmentIds) &&
+          o.garmentIds.length >= 1 &&
+          o.garmentIds.every((id) => cleanGarmentMap.has(id))
+      );
+
+      if (remainingOutfits.length > 0) {
+        const sortedRemaining = sortOutfitsByWearPreference(remainingOutfits, wearCounts);
+        const updatedActive = {
+          ...lastActive,
+          outfits: sortedRemaining,
+          fromCache: true
+        };
+        this.lastResult = updatedActive;
+        await wardrobeDb.setSetting('lastActiveOutfitSuggestions', updatedActive).catch(() => {});
+        await this.renderOutfits(updatedActive, outfitsMount);
+        return;
+      }
+    }
+
+    // No cached outfits available yet — show prompt to click "Suggest Outfits for Tomorrow"
+    outfitsMount.innerHTML = `
+      <div class="empty-state-card">
+        <div class="empty-icon">✨</div>
+        <h3>Ready to Style Tomorrow</h3>
+        <p>Select your occasion and preferences above, then tap <strong>"✨ Suggest Outfits for Tomorrow"</strong> to view your combinations.</p>
+      </div>
+    `;
+  }
+
+  /**
+   * When user changes top options and clicks "Suggest Outfits for Tomorrow",
+   * update cached ideas (e.g., remove jacket in-place or load cached ideas for the selected occasion)
+   */
+  async applyOptionsToCachedOrSuggest() {
+    if (!this.container) return;
+    const outfitsMount = this.container.querySelector('#stylist-outfits-mount');
+    if (!outfitsMount) return;
+
+    const [latestGarments, wearCounts, lastActive] = await Promise.all([
+      wardrobeDb.getAllGarments(),
+      wardrobeDb.getCombinationWearCounts(),
+      wardrobeDb.getSetting('lastActiveOutfitSuggestions', null)
+    ]);
+    this.garments = latestGarments || [];
+    const garmentMap = new Map(this.garments.map((g) => [g.id, g]));
+
+    // Case 1: User only unchecked "Include Jacket / Outerwear" on the currently active cached outfits
+    // -> Remove jacket directly from the cached outfits without calling the API
+    const activeSeason = this.settings.activeSeason || 'winter';
+    if (
+      lastActive &&
+      Array.isArray(lastActive.outfits) &&
+      lastActive.outfits.length > 0 &&
+      lastActive.occasion === this.occasion &&
+      lastActive.activeSeason === activeSeason &&
+      (lastActive.anchorGarmentId || '') === (this.anchorGarmentId || '') &&
+      (lastActive.weatherNote || '') === (this.weatherNote || '') &&
+      lastActive.includeOuterwear === true &&
+      this.includeOuterwear === false
+    ) {
+      const jacketRemovedOutfits = lastActive.outfits
+        .map((o) => {
+          const nextIds = (o.garmentIds || []).filter((id) => {
+            if (id === this.anchorGarmentId) return true;
+            const g = garmentMap.get(id);
+            return g && g.status === 'clean' && g.category !== 'outerwear';
+          });
+          return {
+            ...o,
+            garmentIds: nextIds,
+            combinationKey: buildCombinationKey(nextIds)
+          };
+        })
+        .filter((o) => o.garmentIds.length >= 1);
+
+      if (jacketRemovedOutfits.length > 0) {
+        const sorted = sortOutfitsByWearPreference(jacketRemovedOutfits, wearCounts);
+        const updatedActive = {
+          ...lastActive,
+          includeOuterwear: false,
+          outfits: sorted,
+          fromCache: true
+        };
+        this.lastResult = updatedActive;
+        await wardrobeDb.setSetting('lastActiveOutfitSuggestions', updatedActive).catch(() => {});
+        await this.renderOutfits(updatedActive, outfitsMount);
+        return;
+      }
+    }
+
+    // Otherwise load from per-option cache or compute for the selected options (e.g., Gym clothes)
+    await this.generateSuggestions({ forceRefresh: false });
   }
 
   async generateSuggestions({ forceRefresh = false } = {}) {
@@ -185,11 +318,12 @@ export class TomorrowStylistView {
       ]);
       this.garments = latestGarments || [];
       this.settings = latestSettings || {};
+      const activeSeason = this.settings.activeSeason || 'winter';
 
       const result = await suggestTomorrowOutfits({
         garments: this.garments,
         occasion: this.occasion,
-        activeSeason: this.settings.activeSeason || 'winter',
+        activeSeason,
         anchorGarmentId: this.anchorGarmentId || null,
         weatherNote: this.weatherNote,
         weatherData: this.weather,
@@ -202,7 +336,6 @@ export class TomorrowStylistView {
 
       // Persist newly computed outfits in IndexedDB cache (unless it was an API error fallback)
       if (
-        !result.fromCache &&
         result.cacheKey &&
         !result.fallbackReason &&
         Array.isArray(result.outfits) &&
@@ -221,6 +354,24 @@ export class TomorrowStylistView {
           delete nextCache[keys[0]];
         }
         await wardrobeDb.setSetting('outfitSuggestionsCache', nextCache).catch(() => {});
+      }
+
+      // Also save as the active cached suggestions for the Tomorrow tab
+      if (Array.isArray(result.outfits) && result.outfits.length > 0) {
+        await wardrobeDb
+          .setSetting('lastActiveOutfitSuggestions', {
+            engine: result.engine,
+            outfits: result.outfits,
+            message: result.message,
+            occasion: this.occasion,
+            activeSeason,
+            anchorGarmentId: this.anchorGarmentId || '',
+            weatherNote: this.weatherNote || '',
+            includeOuterwear: this.includeOuterwear,
+            fromCache: Boolean(result.fromCache),
+            updatedAt: new Date().toISOString()
+          })
+          .catch(() => {});
       }
 
       this.lastResult = result;
@@ -404,7 +555,7 @@ export class TomorrowStylistView {
 
             this.garments = await wardrobeDb.getAllGarments();
             await this.render();
-            await this.generateSuggestions();
+            await this.showRemainingCachedOutfits();
           }
         });
         wearModal.open(document.body);

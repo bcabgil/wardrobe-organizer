@@ -251,7 +251,8 @@ export function generateOfflineOutfits({
   anchorGarmentId = null,
   weatherData = null,
   wearCounts = {},
-  includeOuterwear = true
+  includeOuterwear = true,
+  shuffle = false
 } = {}) {
   if (!Array.isArray(garments) || garments.length === 0) {
     return {
@@ -408,49 +409,61 @@ export function generateOfflineOutfits({
       const bottom = candidateBottoms[bIdx];
       let score = scorePairHarmony(primaryTop, bottom, occasion, tempBand);
 
-      // Determine complimentary second top layer (e.g. Base Tee + Mid Jumper in winter/cold)
-      let secondTopLayer = null;
+      // Build complimentary second top layer pool (e.g. Base Tee + Mid Jumper in winter/cold)
+      let secondLayerPool = [null];
       if (needMidLayer && !forbidMidLayer) {
         if (primaryRole === 'base' && midTops.length > 0) {
-          secondTopLayer = midTops[(tIdx + bIdx) % midTops.length];
-          score += 18;
+          secondLayerPool = midTops;
         } else if (primaryRole === 'mid' && baseTops.length > 0) {
-          secondTopLayer = baseTops[(tIdx + bIdx) % baseTops.length];
-          score += 18;
+          secondLayerPool = baseTops;
         }
       }
 
-      const shoe = shoesList.length > 0 ? shoesList[(tIdx + bIdx) % shoesList.length] : null;
-      let coat = null;
-      if (!forbidOuterwear && outerwearList.length > 0) {
-        if (needOuterwear || tIdx === 0) {
-          coat = outerwearList[(tIdx + bIdx) % outerwearList.length];
-          if (needOuterwear) score += 15;
+      for (let mIdx = 0; mIdx < secondLayerPool.length; mIdx++) {
+        const secondTopLayer = secondLayerPool[(tIdx + bIdx + mIdx) % secondLayerPool.length];
+        const comboScore = score + (secondTopLayer ? 18 : 0);
+
+        const shoe = shoesList.length > 0 ? shoesList[(tIdx + bIdx + mIdx) % shoesList.length] : null;
+        let coat = null;
+        if (!forbidOuterwear && outerwearList.length > 0) {
+          if (needOuterwear || tIdx === 0) {
+            coat = outerwearList[(tIdx + bIdx + mIdx) % outerwearList.length];
+          }
         }
+
+        const acc = accessories.length > 0 && (tIdx + mIdx) % 2 === 0 ? accessories[0] : null;
+        // Order base layer before mid layer
+        const orderedTops =
+          secondTopLayer && primaryRole === 'mid'
+            ? [secondTopLayer, primaryTop]
+            : [primaryTop, secondTopLayer].filter(Boolean);
+
+        const items = [...orderedTops, bottom, coat, shoe, acc].filter(Boolean);
+        const label =
+          occasion === 'gym'
+            ? 'Active Training Set'
+            : occasion === 'dress-up'
+              ? 'Elevated Evening Edit'
+              : secondTopLayer || coat
+                ? `Layered ${activeSeason.charAt(0).toUpperCase() + activeSeason.slice(1)} Look`
+                : 'Smart Everyday Essentials';
+
+        addCombo(items, comboScore + (coat && needOuterwear ? 15 : 0), label);
       }
-
-      const acc = accessories.length > 0 && tIdx % 2 === 0 ? accessories[0] : null;
-      // Order base layer before mid layer
-      const orderedTops =
-        secondTopLayer && primaryRole === 'mid'
-          ? [secondTopLayer, primaryTop]
-          : [primaryTop, secondTopLayer].filter(Boolean);
-
-      const items = [...orderedTops, bottom, coat, shoe, acc].filter(Boolean);
-      const label =
-        occasion === 'gym'
-          ? 'Active Training Set'
-          : occasion === 'dress-up'
-            ? 'Elevated Evening Edit'
-            : secondTopLayer || coat
-              ? `Layered ${activeSeason.charAt(0).toUpperCase() + activeSeason.slice(1)} Look`
-              : 'Smart Everyday Essentials';
-
-      addCombo(items, score, label);
     }
   }
 
-  candidateCombinations.sort((a, b) => b.score - a.score);
+  if (shuffle && candidateCombinations.length > 1) {
+    // Fisher-Yates shuffle to surface fresh/different combinations on Refresh Ideas
+    for (let i = candidateCombinations.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = candidateCombinations[i];
+      candidateCombinations[i] = candidateCombinations[j];
+      candidateCombinations[j] = tmp;
+    }
+  } else {
+    candidateCombinations.sort((a, b) => b.score - a.score);
+  }
   const topOutfits = candidateCombinations.slice(0, 3);
 
   if (topOutfits.length === 0) {
