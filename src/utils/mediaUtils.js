@@ -434,3 +434,28 @@ export function createSafeVideoPlayer(srcUrl, mimeType = 'video/mp4', posterUrl 
 
   return video;
 }
+
+/**
+ * Requests persistent storage from the browser (iOS Safari 17+ & Android Chrome)
+ * so IndexedDB data is protected from automatic OS storage eviction.
+ *
+ * @returns {Promise<boolean>}
+ */
+export async function requestPersistentStorage() {
+  try {
+    if (
+      typeof navigator !== 'undefined' &&
+      navigator.storage &&
+      typeof navigator.storage.persist === 'function'
+    ) {
+      const isPersisted =
+        typeof navigator.storage.persisted === 'function'
+          ? await navigator.storage.persisted()
+          : false;
+      if (isPersisted) return true;
+      return await navigator.storage.persist();
+    }
+  } catch (_) {}
+  return false;
+}
+

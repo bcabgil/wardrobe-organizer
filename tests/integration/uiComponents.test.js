@@ -168,4 +168,30 @@ describe('UI Components: Cards, Modals & Media Safeguards', () => {
     const imgOrSvg = el.querySelector('img') || el.querySelector('svg');
     expect(imgOrSvg).toBeDefined();
   });
+
+  it('T2-UI-02: WardrobeApp and all 5 views import and mount cleanly in DOM', async () => {
+    const appRes = await safeImport('../../src/app.js');
+    expect(appRes.ok).toBe(true);
+    expect(appRes.module.WardrobeApp).toBeDefined();
+
+    const gViewRes = await safeImport('../../src/views/GalleryView.js');
+    const aViewRes = await safeImport('../../src/views/AddGarmentView.js');
+    const tViewRes = await safeImport('../../src/views/TomorrowStylistView.js');
+    const lViewRes = await safeImport('../../src/views/LaundryView.js');
+    const bViewRes = await safeImport('../../src/views/BackupSettingsView.js');
+
+    expect(gViewRes.ok).toBe(true);
+    expect(aViewRes.ok).toBe(true);
+    expect(tViewRes.ok).toBe(true);
+    expect(lViewRes.ok).toBe(true);
+    expect(bViewRes.ok).toBe(true);
+
+    // Mount GalleryView into a temporary container and verify it renders the season banner & filters
+    const tempContainer = document.createElement('div');
+    const gallery = new gViewRes.module.GalleryView();
+    await gallery.mount(tempContainer);
+    expect(tempContainer.innerHTML).toContain('Collection');
+    expect(tempContainer.querySelector('#btn-switch-active-season')).toBeDefined();
+    await gallery.unmount();
+  });
 });
