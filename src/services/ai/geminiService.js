@@ -367,10 +367,35 @@ export async function suggestTomorrowOutfits({
   }
 }
 
+export async function testGeminiApiKey(apiKey = '') {
+  const trimmedKey = String(apiKey || '').trim();
+  if (!trimmedKey) {
+    throw new Error('Please paste a Gemini API key first.');
+  }
+  const endpoint = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: 'Reply with {"status":"ok"}' }] }],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: 'application/json'
+      }
+    })
+  });
+  if (!response.ok) {
+    const errText = await response.text().catch(() => '');
+    throw new Error(`HTTP ${response.status}: ${errText.slice(0, 120) || response.statusText}`);
+  }
+  return { ok: true, model: GEMINI_MODEL };
+}
+
 export default {
   AUTO_TAG_SCHEMA,
   OUTFIT_SUGGESTION_SCHEMA,
   cleanJsonOutput,
   analyzeGarmentPhoto,
-  suggestTomorrowOutfits
+  suggestTomorrowOutfits,
+  testGeminiApiKey
 };

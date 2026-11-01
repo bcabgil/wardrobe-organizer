@@ -5,6 +5,7 @@
 
 import { wardrobeDb } from '../db/wardrobeDb.js';
 import { backupManager } from '../services/backup/BackupManager.js';
+import { testGeminiApiKey } from '../services/ai/geminiService.js';
 import { eventBus } from '../utils/eventBus.js';
 import { escapeHtml, formatBytes, formatRelativeDate } from '../utils/domUtils.js';
 import { showToast } from '../components/Toast.js';
@@ -142,10 +143,13 @@ export class BackupSettingsView {
               <label class="form-label" for="gemini-key-input">
                 Google Gemini API Key ${hasKey ? '<span class="key-status-ok">✓ Configured</span>' : '<span class="key-status-missing">(Optional — Free via Google AI Studio)</span>'}
               </label>
-              <input type="password" id="gemini-key-input" name="geminiApiKey" class="form-input" placeholder="Paste your AIzaSy... key from aistudio.google.com" value="${escapeHtml(s.geminiApiKey || '')}" autocomplete="off" />
+              <div style="display:flex; gap:8px;">
+                <input type="password" id="gemini-key-input" name="geminiApiKey" class="form-input" placeholder="Paste your AIzaSy... key from aistudio.google.com" value="${escapeHtml(s.geminiApiKey || '')}" autocomplete="off" />
+                <button type="button" id="btn-test-gemini-key" class="btn-secondary" style="white-space:nowrap;">🔌 Test Key</button>
+              </div>
               <p class="form-help">
                 Get a free key in 2 clicks with your Google account at
-                <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com/app/apikey</a>.
+                <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" style="color:var(--accent-gold);">aistudio.google.com/app/apikey</a>.
                 Stored strictly inside your phone's local IndexedDB.
               </p>
             </div>
@@ -248,6 +252,28 @@ export class BackupSettingsView {
       showToast('Settings saved!', 'success');
       await this.loadState();
       this.render();
+    });
+
+    // Test Gemini API Key button
+    this.container.querySelector('#btn-test-gemini-key')?.addEventListener('click', async () => {
+      const keyInput = this.container.querySelector('#gemini-key-input');
+      const candidateKey = String(keyInput?.value || '').trim();
+      if (!candidateKey) {
+        showToast('Paste your Gemini API key first!', 'error');
+        return;
+      }
+      try {
+        LoadingOverlay.show('Testing connection to Google Gemini 2.5 Flash...');
+        await testGeminiApiKey(candidateKey);
+        await wardrobeDb.setSetting('geminiApiKey', candidateKey);
+        LoadingOverlay.hide();
+        showToast('✓ Connected to Gemini 2.5 Flash & saved your API key!', 'success');
+        await this.loadState();
+        this.render();
+      } catch (err) {
+        LoadingOverlay.hide();
+        showToast(`Gemini key test failed: ${err.message}`, 'error');
+      }
     });
   }
 

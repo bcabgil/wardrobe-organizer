@@ -5,7 +5,7 @@
  * Works 100% autonomously on iPhone and Android when the user's PC is switched off.
  */
 
-const CACHE_NAME = 'wardrobe-organizer-v3';
+const CACHE_NAME = 'wardrobe-organizer-v4';
 
 const APP_SHELL_ASSETS = [
   './',
