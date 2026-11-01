@@ -104,11 +104,11 @@ export class GalleryView {
           </div>
 
           <div class="chip-scroll-row" data-filter-group="seasonFilter">
-            <button type="button" class="filter-chip ${this.filters.seasonFilter === 'active' ? 'active' : ''}" data-val="active">Active (${isWinter ? 'Winter+All' : 'Summer+All'})</button>
-            <button type="button" class="filter-chip ${this.filters.seasonFilter === 'all' ? 'active' : ''}" data-val="all">All Seasons</button>
-            <button type="button" class="filter-chip ${this.filters.seasonFilter === 'winter' ? 'active' : ''}" data-val="winter">❄️ Winter</button>
-            <button type="button" class="filter-chip ${this.filters.seasonFilter === 'summer' ? 'active' : ''}" data-val="summer">☀️ Summer</button>
-            <button type="button" class="filter-chip ${this.filters.seasonFilter === 'all-season' ? 'active' : ''}" data-val="all-season">🔄 All-Season</button>
+            <button type="button" class="filter-chip ${this.filters.seasonFilter === 'active' ? 'active' : ''}" data-val="active">Current Season (${isWinter ? 'Winter + Year-Round' : 'Summer + Year-Round'})</button>
+            <button type="button" class="filter-chip ${this.filters.seasonFilter === 'all' ? 'active' : ''}" data-val="all">All Clothes</button>
+            <button type="button" class="filter-chip ${this.filters.seasonFilter === 'winter' ? 'active' : ''}" data-val="winter">❄️ Winter Only</button>
+            <button type="button" class="filter-chip ${this.filters.seasonFilter === 'summer' ? 'active' : ''}" data-val="summer">☀️ Summer Only</button>
+            <button type="button" class="filter-chip ${this.filters.seasonFilter === 'all-season' ? 'active' : ''}" data-val="all-season">🔄 Year-Round</button>
           </div>
 
           <div class="chip-scroll-row" data-filter-group="status">
