@@ -5,6 +5,7 @@
 
 import { BackupProvider } from './BackupProvider.js';
 import { wardrobeDb } from '../../db/wardrobeDb.js';
+import { blobToArrayBuffer } from '../../utils/mediaUtils.js';
 import { eventBus } from '../../utils/eventBus.js';
 import JSZip from '../../vendor/jszip.min.js';
 
@@ -30,13 +31,24 @@ function formatDateStamp(isoDate = new Date().toISOString()) {
  */
 export function arrayBufferToBase64Ascii(buffer) {
   if (!buffer) return '';
-  const bytes = buffer instanceof Uint8Array
-    ? buffer
-    : buffer instanceof ArrayBuffer
-      ? new Uint8Array(buffer)
-      : ArrayBuffer.isView(buffer)
-        ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
-        : new Uint8Array(0);
+  if (typeof buffer === 'string') {
+    return buffer.replace(/^data:[^;]+;base64,/i, '').replace(/\s+/g, '');
+  }
+
+  let bytes;
+  if (buffer instanceof Uint8Array) {
+    bytes = buffer;
+  } else if (ArrayBuffer.isView(buffer)) {
+    bytes = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+  } else if (
+    buffer instanceof ArrayBuffer ||
+    Object.prototype.toString.call(buffer) === '[object ArrayBuffer]' ||
+    typeof buffer.byteLength === 'number'
+  ) {
+    bytes = new Uint8Array(buffer);
+  } else {
+    bytes = new Uint8Array(0);
+  }
 
   if (bytes.byteLength === 0) return '';
 
@@ -104,13 +116,25 @@ export class LocalArchiveBackupProvider extends BackupProvider {
       wardrobeDb.getOutfitHistory(1000)
     ]);
 
-    const mediaRecords = await new Promise((resolve, reject) => {
+    const rawMediaRecords = await new Promise((resolve, reject) => {
       const tx = db.transaction('media', 'readonly');
       const store = tx.objectStore('media');
       const req = store.getAll();
       req.onsuccess = () => resolve(req.result || []);
       req.onerror = () => reject(req.error);
     });
+
+    const mediaRecords = [];
+    for (const m of rawMediaRecords) {
+      let binaryData = m.data;
+      if (binaryData && typeof Blob !== 'undefined' && binaryData instanceof Blob) {
+        binaryData = await blobToArrayBuffer(binaryData).catch(() => null);
+      }
+      mediaRecords.push({
+        ...m,
+        data: binaryData
+      });
+    }
 
     const mediaMetadata = mediaRecords.map((m) => {
       const ext = getExtensionFromMime(m.mimeType);
@@ -157,6 +181,19 @@ export class LocalArchiveBackupProvider extends BackupProvider {
       };
     });
 
+    // Also attach photoDataBase64 / videoDataBase64 on garments as a redundant self-contained fallback
+    const garmentsWithMediaFallback = garments.map((g) => {
+      const photoRec = g.photoMediaId ? mediaMap.get(g.photoMediaId) : null;
+      const videoRec = g.videoMediaId ? mediaMap.get(g.videoMediaId) : null;
+      return {
+        ...g,
+        photoDataBase64: photoRec && photoRec.data ? arrayBufferToBase64Ascii(photoRec.data) : undefined,
+        photoMimeType: photoRec ? photoRec.mimeType || 'image/jpeg' : undefined,
+        videoDataBase64: videoRec && videoRec.data ? arrayBufferToBase64Ascii(videoRec.data) : undefined,
+        videoMimeType: videoRec ? videoRec.mimeType || 'video/mp4' : undefined
+      };
+    });
+
     const payload = {
       version: 1,
       app: 'WardrobeOrganizerPWA',
@@ -166,7 +203,7 @@ export class LocalArchiveBackupProvider extends BackupProvider {
         ...settings,
         lastBackupAt: now
       },
-      garments,
+      garments: garmentsWithMediaFallback,
       mediaMetadata: mediaWithAscii,
       outfitHistory
     };
@@ -362,9 +399,32 @@ export class LocalArchiveBackupProvider extends BackupProvider {
 
     const existingSettings = await wardrobeDb.getSettings();
     const now = new Date().toISOString();
+    const mediaMetadata = Array.isArray(parsedData.mediaMetadata) ? parsedData.mediaMetadata : [];
+    const incomingGarments = parsedData.garments || [];
+    const hasEmbeddedMediaPayload =
+      Boolean(loadedZip) ||
+      mediaMetadata.some((m) => m && typeof m.dataBase64 === 'string' && m.dataBase64.length > 0) ||
+      incomingGarments.some(
+        (g) =>
+          g &&
+          ((typeof g.photoDataBase64 === 'string' && g.photoDataBase64.length > 0) ||
+            (typeof g.videoDataBase64 === 'string' && g.videoDataBase64.length > 0))
+      );
 
     if (restoreMode === 'replace') {
-      await wardrobeDb.clearDatabase();
+      if (hasEmbeddedMediaPayload) {
+        await wardrobeDb.clearDatabase();
+      } else {
+        // Legacy metadata-only JSON without embedded media: clear garments/history but preserve existing local media blobs!
+        const db = await wardrobeDb.openDb();
+        await new Promise((resolve, reject) => {
+          const tx = db.transaction(['garments', 'outfitHistory'], 'readwrite');
+          tx.objectStore('garments').clear();
+          tx.objectStore('outfitHistory').clear();
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+      }
     }
 
     // 1. Restore Settings (protecting existing non-empty geminiApiKey in merge mode or if incoming is empty)
@@ -391,7 +451,7 @@ export class LocalArchiveBackupProvider extends BackupProvider {
 
     // 2. Restore Media Blobs (from ZIP archive entries OR from Base64 ASCII strings in JSON backup)
     let restoredMediaCount = 0;
-    const mediaMetadata = Array.isArray(parsedData.mediaMetadata) ? parsedData.mediaMetadata : [];
+    const restoredMediaByGarment = new Map();
 
     if (mediaMetadata.length > 0) {
       const db = await wardrobeDb.openDb();
@@ -421,7 +481,8 @@ export class LocalArchiveBackupProvider extends BackupProvider {
             const store = tx.objectStore('media');
             store.put({
               id: meta.id,
-              garmentId: meta.garmentId,
+              mediaId: meta.id,
+              garmentId: meta.garmentId || null,
               type: meta.type || 'photo',
               mimeType: meta.mimeType || 'image/jpeg',
               data: arrayBuffer,
@@ -431,18 +492,70 @@ export class LocalArchiveBackupProvider extends BackupProvider {
             tx.oncomplete = () => resolve();
             tx.onerror = () => reject(tx.error);
           });
+          if (meta.garmentId) {
+            const entry = restoredMediaByGarment.get(meta.garmentId) || {};
+            if (meta.type === 'video') {
+              entry.videoMediaId = meta.id;
+            } else {
+              entry.photoMediaId = meta.id;
+            }
+            restoredMediaByGarment.set(meta.garmentId, entry);
+          }
           restoredMediaCount++;
         }
       }
     }
 
-    // 3. Restore Garments
-    const incomingGarments = parsedData.garments || [];
+    // 3. Restore Garments (and any inline garment photoDataBase64 / videoDataBase64 fallback)
     let restoredGarmentsCount = 0;
     const db = await wardrobeDb.openDb();
 
     for (const incoming of incomingGarments) {
       if (!incoming || !incoming.id) continue;
+
+      let resolvedPhotoId =
+        incoming.photoMediaId || restoredMediaByGarment.get(incoming.id)?.photoMediaId || null;
+      let resolvedVideoId =
+        incoming.videoMediaId || restoredMediaByGarment.get(incoming.id)?.videoMediaId || null;
+
+      // If inline photoDataBase64 is present and media wasn't already restored from mediaMetadata
+      if (typeof incoming.photoDataBase64 === 'string' && incoming.photoDataBase64.length > 0) {
+        const pId = resolvedPhotoId || `photo_${incoming.id}_${Date.now()}`;
+        resolvedPhotoId = pId;
+        const existingMedia = await wardrobeDb.getMedia(pId);
+        if (!existingMedia) {
+          const buf = base64AsciiToArrayBuffer(incoming.photoDataBase64);
+          if (buf && buf.byteLength > 0) {
+            await wardrobeDb.saveMedia({
+              id: pId,
+              garmentId: incoming.id,
+              type: 'photo',
+              mimeType: incoming.photoMimeType || 'image/jpeg',
+              data: buf
+            });
+            restoredMediaCount++;
+          }
+        }
+      }
+
+      if (typeof incoming.videoDataBase64 === 'string' && incoming.videoDataBase64.length > 0) {
+        const vId = resolvedVideoId || `video_${incoming.id}_${Date.now()}`;
+        resolvedVideoId = vId;
+        const existingMedia = await wardrobeDb.getMedia(vId);
+        if (!existingMedia) {
+          const buf = base64AsciiToArrayBuffer(incoming.videoDataBase64);
+          if (buf && buf.byteLength > 0) {
+            await wardrobeDb.saveMedia({
+              id: vId,
+              garmentId: incoming.id,
+              type: 'video',
+              mimeType: incoming.videoMimeType || 'video/mp4',
+              data: buf
+            });
+            restoredMediaCount++;
+          }
+        }
+      }
 
       if (restoreMode === 'merge') {
         const existing = await wardrobeDb.getGarment(incoming.id);
@@ -450,13 +563,14 @@ export class LocalArchiveBackupProvider extends BackupProvider {
           const existingTime = new Date(existing.updatedAt || existing.createdAt || 0).getTime();
           const incomingTime = new Date(incoming.updatedAt || incoming.createdAt || 0).getTime();
           if (incomingTime >= existingTime) {
+            const { photoDataBase64, photoMimeType, videoDataBase64, videoMimeType, ...cleanIncoming } = incoming;
             await new Promise((resolve, reject) => {
               const tx = db.transaction('garments', 'readwrite');
               tx.objectStore('garments').put({
                 ...existing,
-                ...incoming,
-                photoMediaId: incoming.photoMediaId !== undefined ? incoming.photoMediaId : existing.photoMediaId,
-                videoMediaId: incoming.videoMediaId !== undefined ? incoming.videoMediaId : existing.videoMediaId
+                ...cleanIncoming,
+                photoMediaId: resolvedPhotoId || existing.photoMediaId || null,
+                videoMediaId: resolvedVideoId || existing.videoMediaId || null
               });
               tx.oncomplete = () => resolve();
               tx.onerror = () => reject(tx.error);
@@ -482,8 +596,8 @@ export class LocalArchiveBackupProvider extends BackupProvider {
           tempSuitability: incoming.tempSuitability || 'all-temps',
           layerRole: incoming.layerRole || (incoming.category === 'outerwear' ? 'outer' : incoming.category === 'top' ? 'base' : 'single'),
           visualDescription: incoming.visualDescription || '',
-          photoMediaId: incoming.photoMediaId || null,
-          videoMediaId: incoming.videoMediaId || null,
+          photoMediaId: resolvedPhotoId,
+          videoMediaId: resolvedVideoId,
           lastWornAt: incoming.lastWornAt || null,
           createdAt: incoming.createdAt || now,
           updatedAt: incoming.updatedAt || now

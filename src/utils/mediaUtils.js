@@ -47,8 +47,11 @@ export async function blobToArrayBuffer(input) {
     throw new TypeError('blobToArrayBuffer: input is null or undefined');
   }
 
-  // Already an ArrayBuffer
-  if (input instanceof ArrayBuffer) {
+  // Already an ArrayBuffer (including cross-realm IndexedDB ArrayBuffers)
+  if (
+    input instanceof ArrayBuffer ||
+    Object.prototype.toString.call(input) === '[object ArrayBuffer]'
+  ) {
     return input;
   }
 
@@ -81,7 +84,7 @@ export async function blobToArrayBuffer(input) {
 /**
  * Reconstructs a Blob from an ArrayBuffer and explicit MIME type.
  *
- * @param {ArrayBuffer|ArrayBufferView} arrayBuffer
+ * @param {ArrayBuffer|ArrayBufferView|Blob|string} arrayBuffer
  * @param {string} [mimeType='application/octet-stream']
  * @returns {Blob}
  */
@@ -94,12 +97,30 @@ export function arrayBufferToBlob(arrayBuffer, mimeType = 'application/octet-str
     ? mimeType.trim().toLowerCase()
     : 'application/octet-stream';
 
+  if (typeof Blob !== 'undefined' && arrayBuffer instanceof Blob) {
+    return arrayBuffer.type === cleanMime ? arrayBuffer : new Blob([arrayBuffer], { type: cleanMime });
+  }
+
   if (ArrayBuffer.isView(arrayBuffer)) {
     return new Blob([arrayBuffer], { type: cleanMime });
   }
 
-  if (arrayBuffer instanceof ArrayBuffer) {
-    return new Blob([arrayBuffer], { type: cleanMime });
+  if (
+    arrayBuffer instanceof ArrayBuffer ||
+    Object.prototype.toString.call(arrayBuffer) === '[object ArrayBuffer]'
+  ) {
+    return new Blob([new Uint8Array(arrayBuffer)], { type: cleanMime });
+  }
+
+  // If stored as a Base64 ASCII string directly
+  if (typeof arrayBuffer === 'string' && arrayBuffer.length > 0) {
+    const cleanB64 = arrayBuffer.replace(/^data:[^;]+;base64,/i, '').replace(/\s+/g, '');
+    const bin = atob(cleanB64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) {
+      bytes[i] = bin.charCodeAt(i);
+    }
+    return new Blob([bytes], { type: cleanMime });
   }
 
   throw new TypeError('arrayBufferToBlob: provided data is not an ArrayBuffer or ArrayBufferView');

@@ -188,11 +188,14 @@ export class BackupSettingsView {
     // Export Quick JSON
     this.container.querySelector('#btn-export-json')?.addEventListener('click', async () => {
       try {
-        LoadingOverlay.show('Exporting JSON snapshot...');
+        LoadingOverlay.show('Exporting JSON backup with encoded photos & videos...');
         const res = await backupManager.exportAndDeliverMetadataJson();
         LoadingOverlay.hide();
         if (!res.delivery?.aborted) {
-          showToast(`Status snapshot exported (${res.filename})!`, 'success');
+          showToast(
+            `JSON backup exported: ${res.count || 0} garment(s) & ${res.mediaCount || 0} photo/video(s) (${res.filename})!`,
+            'success'
+          );
         }
         await this.loadState();
         this.render();
