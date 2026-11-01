@@ -79,6 +79,8 @@ export class GarmentModal {
             <div class="modal-attributes-grid">
               <div class="attr-pill"><span>Season</span><strong>${escapeHtml(g.season || 'all-season')}</strong></div>
               <div class="attr-pill"><span>Category</span><strong>${escapeHtml(g.category || 'top')}</strong></div>
+              <div class="attr-pill"><span>Layer Role</span><strong>${escapeHtml(g.layerRole || 'base')}</strong></div>
+              <div class="attr-pill"><span>Temp Range</span><strong>${escapeHtml(g.tempSuitability || 'all-temps')}</strong></div>
               <div class="attr-pill"><span>Occasion</span><strong>${escapeHtml(g.type || 'everyday')}</strong></div>
               <div class="attr-pill"><span>Color Group</span><strong>${escapeHtml(g.colorGroup || 'coloured')}</strong></div>
               <div class="attr-pill"><span>Delicate</span><strong>${g.delicate ? 'Yes (Delicate)' : 'No (Regular)'}</strong></div>
@@ -124,6 +126,25 @@ export class GarmentModal {
                     <option value="one-piece" ${g.category === 'one-piece' ? 'selected' : ''}>One-Piece</option>
                     <option value="shoes" ${g.category === 'shoes' ? 'selected' : ''}>Shoes</option>
                     <option value="accessory" ${g.category === 'accessory' ? 'selected' : ''}>Accessory</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-row-2">
+                <label class="form-label">Layering Role
+                  <select name="layerRole" class="form-select">
+                    <option value="base" ${g.layerRole === 'base' ? 'selected' : ''}>👕 Base Layer (Tee/Shirt)</option>
+                    <option value="mid" ${g.layerRole === 'mid' ? 'selected' : ''}>🧶 Mid Layer (Jumper/Knit)</option>
+                    <option value="outer" ${g.layerRole === 'outer' ? 'selected' : ''}>🧥 Outer Layer (Coat/Jacket)</option>
+                    <option value="single" ${g.layerRole === 'single' ? 'selected' : ''}>✨ Single / Bottom / Shoes</option>
+                  </select>
+                </label>
+                <label class="form-label">Temperature Suitability
+                  <select name="tempSuitability" class="form-select">
+                    <option value="freezing" ${g.tempSuitability === 'freezing' ? 'selected' : ''}>🧊 Freezing (&lt;5°C)</option>
+                    <option value="cold" ${g.tempSuitability === 'cold' ? 'selected' : ''}>❄️ Cold (5–14°C)</option>
+                    <option value="mild" ${g.tempSuitability === 'mild' ? 'selected' : ''}>🌤️ Mild (15–22°C)</option>
+                    <option value="warm" ${g.tempSuitability === 'warm' ? 'selected' : ''}>☀️ Warm (&gt;22°C)</option>
+                    <option value="all-temps" ${(!g.tempSuitability || g.tempSuitability === 'all-temps') ? 'selected' : ''}>🌡️ All Temps</option>
                   </select>
                 </label>
               </div>
@@ -238,6 +259,8 @@ export class GarmentModal {
           name: String(fd.get('name') || '').trim() || g.name,
           season: fd.get('season'),
           category: fd.get('category'),
+          layerRole: fd.get('layerRole') || g.layerRole || 'base',
+          tempSuitability: fd.get('tempSuitability') || g.tempSuitability || 'all-temps',
           colorGroup: fd.get('colorGroup'),
           delicate: fd.get('delicate') === 'true',
           type: fd.get('type'),

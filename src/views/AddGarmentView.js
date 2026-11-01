@@ -19,6 +19,8 @@ export class AddGarmentView {
       name: '',
       category: 'top',
       season: 'winter',
+      tempSuitability: 'cold',
+      layerRole: 'base',
       colorGroup: 'coloured',
       delicate: false,
       status: 'clean',
@@ -32,6 +34,7 @@ export class AddGarmentView {
     const settings = await wardrobeDb.getSettings();
     if (settings && settings.activeSeason) {
       this.formState.season = settings.activeSeason;
+      this.formState.tempSuitability = settings.activeSeason === 'winter' ? 'cold' : 'warm';
     }
     this.render();
   }
@@ -100,6 +103,27 @@ export class AddGarmentView {
               <button type="button" class="pill-btn ${this.formState.category === 'one-piece' ? 'active' : ''}" data-val="one-piece">👗 One-Piece</button>
               <button type="button" class="pill-btn ${this.formState.category === 'shoes' ? 'active' : ''}" data-val="shoes">👟 Shoes</button>
               <button type="button" class="pill-btn ${this.formState.category === 'accessory' ? 'active' : ''}" data-val="accessory">🧣 Accessory</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <span class="form-label">Layering Role (For Multi-Layer Outfits like Tee + Jumper)</span>
+            <div class="pill-selector" data-field="layerRole">
+              <button type="button" class="pill-btn ${this.formState.layerRole === 'base' ? 'active' : ''}" data-val="base">👕 Base (Tee / Shirt)</button>
+              <button type="button" class="pill-btn ${this.formState.layerRole === 'mid' ? 'active' : ''}" data-val="mid">🧶 Mid (Jumper / Knit / Hoodie)</button>
+              <button type="button" class="pill-btn ${this.formState.layerRole === 'outer' ? 'active' : ''}" data-val="outer">🧥 Outer (Coat / Jacket)</button>
+              <button type="button" class="pill-btn ${this.formState.layerRole === 'single' ? 'active' : ''}" data-val="single">✨ Single / Bottom / Shoes</button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <span class="form-label">Temperature Suitability</span>
+            <div class="pill-selector" data-field="tempSuitability">
+              <button type="button" class="pill-btn ${this.formState.tempSuitability === 'freezing' ? 'active' : ''}" data-val="freezing">🧊 Freezing (&lt;5°C)</button>
+              <button type="button" class="pill-btn ${this.formState.tempSuitability === 'cold' ? 'active' : ''}" data-val="cold">❄️ Cold (5–14°C)</button>
+              <button type="button" class="pill-btn ${this.formState.tempSuitability === 'mild' ? 'active' : ''}" data-val="mild">🌤️ Mild (15–22°C)</button>
+              <button type="button" class="pill-btn ${this.formState.tempSuitability === 'warm' ? 'active' : ''}" data-val="warm">☀️ Warm (&gt;22°C)</button>
+              <button type="button" class="pill-btn ${this.formState.tempSuitability === 'all-temps' ? 'active' : ''}" data-val="all-temps">🌡️ All Temps</button>
             </div>
           </div>
 
@@ -219,7 +243,7 @@ export class AddGarmentView {
         if (nameInput && tagResult.name) nameInput.value = tagResult.name;
         if (descInput && tagResult.visualDescription) descInput.value = tagResult.visualDescription;
 
-        ['category', 'season', 'colorGroup', 'delicate', 'type'].forEach((field) => {
+        ['category', 'season', 'tempSuitability', 'layerRole', 'colorGroup', 'delicate', 'type'].forEach((field) => {
           if (tagResult[field] !== undefined) {
             this.formState[field] = tagResult[field];
             const groupEl = this.container.querySelector(`.pill-selector[data-field="${field}"]`);

@@ -38,6 +38,25 @@ function generateUUID() {
   });
 }
 
+function inferDefaultLayerRole(garment = {}) {
+  if (garment.layerRole) return garment.layerRole;
+  const cat = String(garment.category || 'top').toLowerCase();
+  if (cat === 'outerwear') return 'outer';
+  if (cat !== 'top') return 'single';
+  const text = `${garment.name || ''} ${garment.visualDescription || ''}`.toLowerCase();
+  if (/jumper|sweater|cardigan|hoodie|pullover|knit|fleece|sweatshirt|vest|turtleneck/i.test(text)) {
+    return 'mid';
+  }
+  return 'base';
+}
+
+function inferDefaultTempSuitability(garment = {}) {
+  if (garment.tempSuitability) return garment.tempSuitability;
+  if (garment.season === 'winter') return 'cold';
+  if (garment.season === 'summer') return 'warm';
+  return 'all-temps';
+}
+
 export class WardrobeDB {
   constructor() {
     this._dbPromise = null;
@@ -229,6 +248,8 @@ export class WardrobeDB {
       delicate: Boolean(garment.delicate),
       status: garment.status || 'clean',
       type: garment.type || 'everyday',
+      tempSuitability: inferDefaultTempSuitability(garment),
+      layerRole: inferDefaultLayerRole(garment),
       visualDescription: garment.visualDescription || '',
       photoMediaId: photoRecord ? photoRecord.id : (garment.photoMediaId || null),
       videoMediaId: videoRecord ? videoRecord.id : (garment.videoMediaId || null),
@@ -594,9 +615,9 @@ export class WardrobeDB {
   }
 
   /**
-   * Mark garments as worn and update lastWornAt timestamp
+   * Mark garments as worn, move to 'to_wash' (unless markToWash is false), and update lastWornAt timestamp
    */
-  async markGarmentsWorn(garmentIds = [], wornAt = null) {
+  async markGarmentsWorn(garmentIds = [], wornAt = null, markToWash = true) {
     if (!garmentIds || garmentIds.length === 0) return 0;
     const timestamp = wornAt || new Date().toISOString();
     const db = await this.openDb();
@@ -611,6 +632,9 @@ export class WardrobeDB {
         req.onsuccess = () => {
           const garment = req.result;
           if (garment) {
+            if (markToWash) {
+              garment.status = 'to_wash';
+            }
             garment.lastWornAt = timestamp;
             garment.updatedAt = timestamp;
             store.put(garment);

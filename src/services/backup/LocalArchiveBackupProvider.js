@@ -405,6 +405,8 @@ export class LocalArchiveBackupProvider extends BackupProvider {
           delicate: Boolean(incoming.delicate),
           status: incoming.status || 'clean',
           type: incoming.type || 'everyday',
+          tempSuitability: incoming.tempSuitability || 'all-temps',
+          layerRole: incoming.layerRole || (incoming.category === 'outerwear' ? 'outer' : incoming.category === 'top' ? 'base' : 'single'),
           visualDescription: incoming.visualDescription || '',
           photoMediaId: incoming.photoMediaId || null,
           videoMediaId: incoming.videoMediaId || null,

@@ -23,6 +23,21 @@ export class GarmentCard {
     const seasonLabel = g.season === 'winter' ? 'Winter' : g.season === 'summer' ? 'Summer' : 'All-Season';
     const colorLabel = g.colorGroup === 'whites' ? 'Whites' : 'Coloured';
     const typeLabel = g.type === 'gym' ? 'Gym' : g.type === 'dress-up' ? 'Dress-up' : 'Everyday';
+    const tempLabels = {
+      freezing: '🧊 <5°C',
+      cold: '❄️ 5–14°C',
+      mild: '🌤️ 15–22°C',
+      warm: '☀️ >22°C',
+      'all-temps': '🌡️ All Temps'
+    };
+    const tempBadge = g.tempSuitability && tempLabels[g.tempSuitability]
+      ? `<span class="badge-chip">${tempLabels[g.tempSuitability]}</span>`
+      : '';
+    const layerBadge = g.category === 'top' && g.layerRole === 'mid'
+      ? `<span class="badge-chip">🧶 Mid Layer</span>`
+      : g.category === 'top' && g.layerRole === 'base'
+        ? `<span class="badge-chip">👕 Base</span>`
+        : '';
 
     const mediaHtml = this.photoUrl
       ? `<img src="${escapeHtml(this.photoUrl)}" alt="${escapeHtml(g.name || 'Garment')}" class="garment-card-img" loading="lazy" />`
@@ -52,6 +67,8 @@ export class GarmentCard {
         <div class="garment-card-tags">
           <span class="badge-chip">${escapeHtml(typeLabel)}</span>
           <span class="badge-chip">${escapeHtml(colorLabel)}</span>
+          ${tempBadge}
+          ${layerBadge}
           ${delicateBadgeHtml}
         </div>
         <div class="garment-card-actions">

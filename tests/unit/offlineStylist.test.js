@@ -174,6 +174,70 @@ describe('Offline Stylist: Rule-Based Fashion AI Engine', () => {
     expect(firstOutfit.layeringTips).toBeDefined();
   });
 
+  it('T1-STY-07: combines multi-layer tops (base t-shirt/shirt + mid jumper/sweater) in winter/cold weather', async (ctx) => {
+    if (!stylistMod) return;
+
+    const generate = stylistMod.generateOfflineOutfits || stylistMod.default?.generateOfflineOutfits;
+    const coldWeather = {
+      tempMin: 2,
+      tempMax: 8,
+      rainProb: 20,
+      condition: 'Cold winter day'
+    };
+
+    const result = generate({
+      garments: SAMPLE_WARDROBE,
+      occasion: 'everyday',
+      activeSeason: 'winter',
+      weatherData: coldWeather
+    });
+
+    expect(result.outfits.length).toBeGreaterThanOrEqual(1);
+    const firstOutfit = result.outfits[0];
+
+    // Should include BOTH the base layer shirt ('top_w_2') AND the mid-layer wool sweater ('top_w_1')
+    expect(firstOutfit.garmentIds).toContain('top_w_2');
+    expect(firstOutfit.garmentIds).toContain('top_w_1');
+  });
+
+  it('T1-STY-08: filters and prioritizes garments according to tempSuitability metadata', async (ctx) => {
+    if (!stylistMod) return;
+
+    const generate = stylistMod.generateOfflineOutfits || stylistMod.default?.generateOfflineOutfits;
+    const tempTaggedWardrobe = [
+      { id: 'base_tee', name: 'Cotton Base Tee', category: 'top', season: 'all-season', layerRole: 'base', tempSuitability: 'all-temps', colorGroup: 'whites', delicate: false, status: 'clean', type: 'everyday' },
+      { id: 'heavy_jumper', name: 'Alpine Chunky Jumper', category: 'top', season: 'all-season', layerRole: 'mid', tempSuitability: 'freezing', colorGroup: 'coloured', delicate: true, status: 'clean', type: 'everyday' },
+      { id: 'tank_warm', name: 'Thin Beach Tank', category: 'top', season: 'all-season', layerRole: 'single', tempSuitability: 'warm', colorGroup: 'whites', delicate: false, status: 'clean', type: 'everyday' },
+      { id: 'jeans_all', name: 'Straight Jeans', category: 'bottom', season: 'all-season', layerRole: 'single', tempSuitability: 'all-temps', colorGroup: 'coloured', delicate: false, status: 'clean', type: 'everyday' }
+    ];
+
+    // In freezing weather (-2°C to 3°C), should include base_tee + heavy_jumper and exclude warm-only tank_warm
+    const freezingRes = generate({
+      garments: tempTaggedWardrobe,
+      occasion: 'everyday',
+      activeSeason: 'winter',
+      weatherData: { tempMin: -2, tempMax: 3, rainProb: 10, condition: 'Freezing' }
+    });
+
+    expect(freezingRes.outfits.length).toBeGreaterThanOrEqual(1);
+    expect(freezingRes.outfits[0].garmentIds).toContain('base_tee');
+    expect(freezingRes.outfits[0].garmentIds).toContain('heavy_jumper');
+    expect(freezingRes.outfits[0].garmentIds).not.toContain('tank_warm');
+
+    // In hot weather (26°C to 33°C), should exclude heavy_jumper (tempSuitability: 'freezing')
+    const hotRes = generate({
+      garments: tempTaggedWardrobe,
+      occasion: 'everyday',
+      activeSeason: 'summer',
+      weatherData: { tempMin: 26, tempMax: 33, rainProb: 0, condition: 'Hot and sunny' }
+    });
+
+    expect(hotRes.outfits.length).toBeGreaterThanOrEqual(1);
+    for (const outfit of hotRes.outfits) {
+      expect(outfit.garmentIds).not.toContain('heavy_jumper');
+    }
+  });
+
   // ==========================================
   // TIER 2: BOUNDARY & EDGE CASES
   // ==========================================

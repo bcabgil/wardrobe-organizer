@@ -131,4 +131,54 @@ describe('Laundry Integration: 4-Basket Segregation & Batch Updates', () => {
     const updated = await dbMod.markGarmentsClean([]);
     expect(updated).toBe(0);
   });
+
+  it('T1-LAU-03: markGarmentsWorn moves worn outfit pieces to to_wash and populates laundry baskets', async (ctx) => {
+    if (!dbMod) return;
+
+    const tee = await dbMod.addGarment({
+      id: 'worn_tee_1',
+      name: 'Base White Tee',
+      category: 'top',
+      layerRole: 'base',
+      tempSuitability: 'all-temps',
+      season: 'winter',
+      colorGroup: 'whites',
+      delicate: false,
+      status: 'clean',
+      type: 'everyday'
+    });
+    const coat = await dbMod.addGarment({
+      id: 'worn_coat_1',
+      name: 'Wool Overcoat',
+      category: 'outerwear',
+      layerRole: 'outer',
+      tempSuitability: 'cold',
+      season: 'winter',
+      colorGroup: 'coloured',
+      delicate: true,
+      status: 'clean',
+      type: 'everyday'
+    });
+
+    try {
+      // Simulate "Wear This Outfit" confirmation: tee checked to wash, coat unchecked (keep clean)
+      await dbMod.markGarmentsWorn([tee.id], null, true);
+      await dbMod.markGarmentsWorn([coat.id], null, false);
+
+      const updatedTee = await dbMod.getGarment(tee.id);
+      const updatedCoat = await dbMod.getGarment(coat.id);
+
+      expect(updatedTee.status).toBe('to_wash');
+      expect(updatedTee.lastWornAt).toBeDefined();
+      expect(updatedCoat.status).toBe('clean');
+      expect(updatedCoat.lastWornAt).toBeDefined();
+
+      const loads = await dbMod.getLaundryLoads();
+      expect(loads.whitesRegular.some((g) => g.id === tee.id)).toBe(true);
+      expect(loads.colouredDelicate.some((g) => g.id === coat.id)).toBe(false);
+    } finally {
+      await dbMod.deleteGarment(tee.id);
+      await dbMod.deleteGarment(coat.id);
+    }
+  });
 });

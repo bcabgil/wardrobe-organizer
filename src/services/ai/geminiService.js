@@ -7,7 +7,7 @@
  */
 
 import { optimizeImageForGemini } from './imageOptimizer.js';
-import { generateOfflineOutfits } from './offlineStylist.js';
+import { generateOfflineOutfits, inferLayerRole, inferTempSuitability } from './offlineStylist.js';
 
 export const GEMINI_MODEL = 'gemini-2.5-flash';
 export const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -29,6 +29,16 @@ export const AUTO_TAG_SCHEMA = {
       enum: ['winter', 'summer', 'all-season'],
       description: 'Best season for wearing this garment'
     },
+    tempSuitability: {
+      type: 'STRING',
+      enum: ['freezing', 'cold', 'mild', 'warm', 'all-temps'],
+      description: 'Temperature range this garment is suited for: freezing (<5C), cold (5-14C), mild (15-22C), warm (>22C), or all-temps'
+    },
+    layerRole: {
+      type: 'STRING',
+      enum: ['base', 'mid', 'outer', 'single'],
+      description: 'Layering role: "base" (t-shirt/shirt worn next to skin), "mid" (jumper/sweater/cardigan/hoodie worn over a base top), "outer" (jacket/coat), or "single" (bottoms/shoes/dresses)'
+    },
     colorGroup: {
       type: 'STRING',
       enum: ['whites', 'coloured'],
@@ -48,7 +58,7 @@ export const AUTO_TAG_SCHEMA = {
       description: 'Detailed visual description of exact colors, fabric texture, cut, and styling vibe'
     }
   },
-  required: ['name', 'category', 'season', 'colorGroup', 'delicate', 'type', 'visualDescription']
+  required: ['name', 'category', 'season', 'tempSuitability', 'layerRole', 'colorGroup', 'delicate', 'type', 'visualDescription']
 };
 
 export const OUTFIT_SUGGESTION_SCHEMA = {
@@ -128,6 +138,8 @@ export async function analyzeGarmentPhoto(imageBlob, apiKey = '') {
       '- name: short stylish title (e.g. "Charcoal Merino Sweater", "White Cotton Oxford")',
       '- category: one of "top", "bottom", "outerwear", "one-piece", "shoes", "accessory"',
       '- season: one of "winter", "summer", "all-season"',
+      '- tempSuitability: one of "freezing" (<5°C), "cold" (5-14°C), "mild" (15-22°C), "warm" (>22°C), "all-temps"',
+      '- layerRole: "base" if t-shirt/shirt/blouse/top worn as first layer; "mid" if jumper/sweater/cardigan/hoodie/vest worn over a base top; "outer" if coat/jacket; "single" for bottoms/shoes/dresses',
       '- colorGroup: "whites" if predominantly white/cream/ivory for laundry sorting, otherwise "coloured"',
       '- delicate: true if knitwear, wool, silk, linen, cashmere, sheer, or tailored; false if durable cotton/denim/synthetics',
       '- type: one of "everyday", "gym", "dress-up"',
@@ -175,6 +187,12 @@ export async function analyzeGarmentPhoto(imageBlob, apiKey = '') {
       season: ['winter', 'summer', 'all-season'].includes(parsed.season)
         ? parsed.season
         : 'all-season',
+      tempSuitability: ['freezing', 'cold', 'mild', 'warm', 'all-temps'].includes(parsed.tempSuitability)
+        ? parsed.tempSuitability
+        : 'all-temps',
+      layerRole: ['base', 'mid', 'outer', 'single'].includes(parsed.layerRole)
+        ? parsed.layerRole
+        : 'base',
       colorGroup: parsed.colorGroup === 'whites' ? 'whites' : 'coloured',
       delicate: Boolean(parsed.delicate),
       type: ['everyday', 'gym', 'dress-up'].includes(parsed.type) ? parsed.type : 'everyday',
@@ -215,10 +233,29 @@ async function fallbackHeuristicPhotoAnalysis(imageBlob, reason = '') {
       ? 'dress-up'
       : 'everyday';
 
+  const tempSuitability = /parka|puffer|thermal|down|overcoat/i.test(lower)
+    ? 'freezing'
+    : season === 'winter'
+      ? 'cold'
+      : season === 'summer'
+        ? 'warm'
+        : 'all-temps';
+
+  const layerRole =
+    category === 'outerwear'
+      ? 'outer'
+      : category !== 'top'
+        ? 'single'
+        : /jumper|sweater|cardigan|hoodie|pullover|knit|fleece|vest|sweatshirt/i.test(lower)
+          ? 'mid'
+          : 'base';
+
   return {
     name: fileName ? fileName.charAt(0).toUpperCase() + fileName.slice(1) : 'New Wardrobe Piece',
     category,
     season,
+    tempSuitability,
+    layerRole,
     colorGroup: isWhite ? 'whites' : 'coloured',
     delicate,
     type,
@@ -270,6 +307,8 @@ export async function suggestTomorrowOutfits({
       name: g.name,
       category: g.category,
       season: g.season,
+      tempSuitability: inferTempSuitability(g),
+      layerRole: inferLayerRole(g),
       colorGroup: g.colorGroup,
       type: g.type,
       visualDescription: g.visualDescription || ''
@@ -289,9 +328,12 @@ export async function suggestTomorrowOutfits({
       `Target Occasion: "${occasion}"`,
       `Active Season: "${activeSeason}"`,
       `Weather Context: "${weatherContextStr}"`,
+      'MULTI-LAYERING & TEMPERATURE SUITABILITY RULES:',
+      '- In winter or cold/chilly weather (< 16°C), do NOT suggest only a single thin top! Combine a base-layer top (layerRole="base", e.g. t-shirt/shirt) AND a mid-layer top (layerRole="mid", e.g. jumper/sweater/cardigan/hoodie) PLUS a bottom and outerwear/shoes when available.',
+      '- Match each garment\'s tempSuitability ("freezing", "cold", "mild", "warm", "all-temps") to the forecast temperature.',
       anchorItem
         ? `CRITICAL REQUIREMENT: Every single suggested outfit MUST include the anchor garment ID "${anchorItem.id}" (${anchorItem.name}).`
-        : 'Combine tops + bottoms (or one-piece) + optional outerwear/shoes/accessories that harmonize in color and silhouette.',
+        : 'Combine base/mid tops + bottoms (or one-piece) + optional outerwear/shoes/accessories that harmonize in color and silhouette.',
       'Only use garment IDs that exist in the provided inventory JSON.',
       `Available Clean Inventory JSON:\n${JSON.stringify(inventorySummary, null, 2)}`
     ].join('\n\n');

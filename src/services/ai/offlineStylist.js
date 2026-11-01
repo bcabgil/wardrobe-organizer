@@ -3,12 +3,76 @@
  * Generates cohesive 2-3 outfit recommendations based on:
  * - Clean status (strictly excludes 'to_wash')
  * - Active Season (includes activeSeason + 'all-season')
+ * - Temperature Suitability ('freezing', 'cold', 'mild', 'warm', 'all-temps')
+ * - Multi-Layering Role ('base' tee/shirt + 'mid' jumper/sweater/cardigan + 'outer' coat in cold/winter)
  * - Occasion ('everyday', 'gym', 'dress-up')
  * - Anchor Garment pinning (guaranteed inclusion in 100% of outfits)
- * - Weather adaptation (adds outerwear for cold/rain, avoids outerwear in heat)
  */
 
 const NEUTRAL_KEYWORDS = ['white', 'black', 'grey', 'gray', 'navy', 'beige', 'cream', 'camel', 'charcoal', 'khaki', 'denim', 'indigo', 'brown', 'tan', 'ivory'];
+
+export function inferLayerRole(garment = {}) {
+  if (garment.layerRole && ['base', 'mid', 'outer', 'single'].includes(garment.layerRole)) {
+    return garment.layerRole;
+  }
+  const cat = String(garment.category || 'top').toLowerCase();
+  if (cat === 'outerwear') return 'outer';
+  if (cat !== 'top') return 'single';
+
+  const text = `${garment.name || ''} ${garment.visualDescription || ''}`.toLowerCase();
+  if (/jumper|sweater|cardigan|hoodie|pullover|knit|fleece|sweatshirt|vest|turtleneck|quarter-zip/i.test(text)) {
+    return 'mid';
+  }
+  return 'base';
+}
+
+export function inferTempSuitability(garment = {}) {
+  if (
+    garment.tempSuitability &&
+    ['freezing', 'cold', 'mild', 'warm', 'all-temps'].includes(garment.tempSuitability)
+  ) {
+    return garment.tempSuitability;
+  }
+  if (garment.season === 'all-season') return 'all-temps';
+  if (garment.season === 'winter') return 'cold';
+  if (garment.season === 'summer') return 'warm';
+  return 'all-temps';
+}
+
+export function isGarmentTempCompatible(garment, targetTempBand, role) {
+  const suit = inferTempSuitability(garment);
+  if (suit === 'all-temps' || !targetTempBand) return true;
+
+  // Base layers (t-shirts, shirts) can be worn under jumpers even in cold/freezing weather
+  if (role === 'base' && (targetTempBand === 'cold' || targetTempBand === 'freezing')) {
+    return true;
+  }
+
+  if (targetTempBand === 'warm') {
+    // In hot weather, avoid freezing/cold garments
+    return suit === 'warm' || suit === 'mild';
+  }
+  if (targetTempBand === 'freezing') {
+    return suit === 'freezing' || suit === 'cold' || suit === 'mild';
+  }
+  if (targetTempBand === 'cold') {
+    return suit === 'cold' || suit === 'freezing' || suit === 'mild';
+  }
+  // mild
+  return suit !== 'freezing';
+}
+
+function getTargetTempBand(weatherData, activeSeason) {
+  if (weatherData && typeof weatherData === 'object') {
+    const tempMax = typeof weatherData.tempMax === 'number' ? weatherData.tempMax : null;
+    const tempMin = typeof weatherData.tempMin === 'number' ? weatherData.tempMin : null;
+    if ((tempMax !== null && tempMax <= 5) || (tempMin !== null && tempMin <= 0)) return 'freezing';
+    if ((tempMax !== null && tempMax <= 16) || (tempMin !== null && tempMin <= 10)) return 'cold';
+    if ((tempMax !== null && tempMax >= 25) || (tempMin !== null && tempMin >= 20)) return 'warm';
+    return 'mild';
+  }
+  return activeSeason === 'winter' ? 'cold' : 'warm';
+}
 
 function hasNeutralTone(garment) {
   const text = `${garment.name || ''} ${garment.visualDescription || ''}`.toLowerCase();
@@ -16,72 +80,109 @@ function hasNeutralTone(garment) {
   return NEUTRAL_KEYWORDS.some((kw) => text.includes(kw));
 }
 
-function scorePairHarmony(itemA, itemB, occasion) {
+function scorePairHarmony(itemA, itemB, occasion, targetTempBand) {
   let score = 50;
   if (!itemA || !itemB) return score;
 
-  // Occasion match bonus
   if (itemA.type === occasion) score += 20;
   if (itemB.type === occasion) score += 20;
 
-  // Color harmony: whites + coloured or neutral + statement
   if (itemA.colorGroup !== itemB.colorGroup) {
     score += 15;
   } else if (hasNeutralTone(itemA) || hasNeutralTone(itemB)) {
     score += 12;
   }
 
-  // Texture / delicate balance
-  if (itemA.delicate && itemB.delicate && occasion === 'dress-up') {
-    score += 10;
-  }
+  // Temperature match bonus
+  const suitA = inferTempSuitability(itemA);
+  const suitB = inferTempSuitability(itemB);
+  if (suitA === targetTempBand) score += 12;
+  if (suitB === targetTempBand) score += 12;
 
   return score;
 }
 
-function shouldIncludeOuterwear(weatherData, activeSeason) {
+function evaluateLayeringNeeds(weatherData, activeSeason) {
+  const tempBand = getTargetTempBand(weatherData, activeSeason);
+
   if (weatherData && typeof weatherData === 'object') {
     const tempMax = typeof weatherData.tempMax === 'number' ? weatherData.tempMax : null;
     const tempMin = typeof weatherData.tempMin === 'number' ? weatherData.tempMin : null;
     const rainProb = typeof weatherData.rainProb === 'number' ? weatherData.rainProb : 0;
     const cond = String(weatherData.condition || '').toLowerCase();
 
-    // Hot weather (> 25°C max or > 22°C min) -> strictly avoid heavy outerwear
-    if ((tempMax !== null && tempMax >= 26) || (tempMin !== null && tempMin >= 22) || /hot|heat|scorching/i.test(cond)) {
-      return { needOuterwear: false, forbidOuterwear: true };
+    if ((tempMax !== null && tempMax >= 25) || (tempMin !== null && tempMin >= 21) || /hot|heat|scorching/i.test(cond)) {
+      return {
+        tempBand: 'warm',
+        needMidLayer: false,
+        needOuterwear: false,
+        forbidOuterwear: true,
+        forbidMidLayer: true
+      };
     }
 
-    // Cold (< 15°C) or rainy (>= 50%)
-    if (
-      (tempMax !== null && tempMax <= 15) ||
-      (tempMin !== null && tempMin <= 10) ||
+    const isChillyOrCold =
+      (tempMax !== null && tempMax <= 16) ||
+      (tempMin !== null && tempMin <= 11) ||
+      /cold|chilly|freezing|snow|frost/i.test(cond) ||
+      activeSeason === 'winter';
+
+    const isWetOrCold =
+      isChillyOrCold ||
       rainProb >= 50 ||
-      /rain|shower|storm|snow|cold|chilly|freezing|wind/i.test(cond)
-    ) {
-      return { needOuterwear: true, forbidOuterwear: false };
-    }
+      /rain|shower|storm|wind/i.test(cond);
+
+    return {
+      tempBand,
+      needMidLayer: isChillyOrCold,
+      needOuterwear: isWetOrCold,
+      forbidOuterwear: false,
+      forbidMidLayer: false
+    };
   }
 
-  // Default by season
   if (activeSeason === 'winter') {
-    return { needOuterwear: true, forbidOuterwear: false };
+    return {
+      tempBand: 'cold',
+      needMidLayer: true,
+      needOuterwear: true,
+      forbidOuterwear: false,
+      forbidMidLayer: false
+    };
   }
-  return { needOuterwear: false, forbidOuterwear: false };
+
+  return {
+    tempBand: 'warm',
+    needMidLayer: false,
+    needOuterwear: false,
+    forbidOuterwear: false,
+    forbidMidLayer: false
+  };
 }
 
-function buildLayeringTip(weatherData, activeSeason, hasOuterwear, garmentsInOutfit) {
-  const names = garmentsInOutfit.map((g) => g.name).join(', ');
+function buildLayeringTip(weatherData, activeSeason, hasMidLayer, hasOuterwear, garmentsInOutfit) {
+  const basePiece = garmentsInOutfit.find((g) => g.category === 'top' && inferLayerRole(g) === 'base');
+  const midPiece = garmentsInOutfit.find((g) => g.category === 'top' && inferLayerRole(g) === 'mid');
+
+  if (hasMidLayer && basePiece && midPiece) {
+    const collarHint = `Layer your ${midPiece.name} over the ${basePiece.name} for warmth—you can remove the ${midPiece.name} indoors if it's warm.`;
+    if (weatherData && (weatherData.rainProb >= 50 || typeof weatherData.tempMax === 'number')) {
+      return `${collarHint} Tomorrow's range (${weatherData.tempMin ?? ''}°C–${weatherData.tempMax ?? ''}°C) makes multi-layering ideal.`;
+    }
+    return collarHint;
+  }
+
   if (weatherData && typeof weatherData === 'object') {
     const rainProb = weatherData.rainProb || 0;
     const tempMax = weatherData.tempMax;
     if (rainProb >= 50) {
-      return `Tomorrow has a ${rainProb}% chance of rain (${weatherData.condition || 'wet conditions'}). Keep your outer layer handy and protect delicate fabrics over ${names}.`;
+      return `Tomorrow has a ${rainProb}% chance of rain (${weatherData.condition || 'wet conditions'}). Keep your outer layer handy.`;
     }
     if (typeof tempMax === 'number' && tempMax <= 12) {
-      return `Chilly temperatures ahead (up to ${tempMax}°C). Layer closely for warmth and structure.`;
+      return `Chilly temperatures ahead (up to ${tempMax}°C). Layer closely for warmth and insulation.`;
     }
     if (typeof tempMax === 'number' && tempMax >= 26) {
-      return `Warm conditions (${tempMax}°C). Wear breathable single layers and skip heavy jackets.`;
+      return `Warm conditions (${tempMax}°C). Wear a breathable single base layer and skip jumpers or heavy jackets.`;
     }
   }
   if (hasOuterwear) {
@@ -92,13 +193,7 @@ function buildLayeringTip(weatherData, activeSeason, hasOuterwear, garmentsInOut
 
 /**
  * Generate 1-3 rule-based outfits synchronously (100% offline capable)
- * @param {Object} params
- * @param {Array<Object>} params.garments
- * @param {string} [params.occasion='everyday']
- * @param {string} [params.activeSeason='winter']
- * @param {string|null} [params.anchorGarmentId=null]
- * @param {Object|null} [params.weatherData=null]
- * @returns {{ engine: 'offline', outfits: Array<Object>, message?: string }}
+ * Supports multi-layering (Base Tee/Shirt + Mid Jumper/Sweater + Outer Coat) and temperature suitability.
  */
 export function generateOfflineOutfits({
   garments = [],
@@ -125,17 +220,23 @@ export function generateOfflineOutfits({
     };
   }
 
-  // 2. Filter by Active Season (activeSeason + 'all-season')
-  const inSeasonGarments = cleanGarments.filter(
-    (g) => !g.season || g.season === activeSeason || g.season === 'all-season'
-  );
+  // 2. Evaluate weather & layering needs
+  const { tempBand, needMidLayer, needOuterwear, forbidOuterwear, forbidMidLayer } =
+    evaluateLayeringNeeds(weatherData, activeSeason);
+
+  // 3. Filter by Active Season (activeSeason + 'all-season') and Temperature Compatibility
+  const inSeasonGarments = cleanGarments.filter((g) => {
+    const seasonOk = !g.season || g.season === activeSeason || g.season === 'all-season';
+    if (!seasonOk) return false;
+    const role = inferLayerRole(g);
+    return isGarmentTempCompatible(g, tempBand, role);
+  });
 
   // Locate anchor piece if requested (must be clean)
   const anchorItem = anchorGarmentId
     ? cleanGarments.find((g) => g.id === anchorGarmentId) || null
     : null;
 
-  // Candidate pool: prefer matching occasion first, fallback to broader in-season pool for missing categories
   const filterByCategory = (cat, strictOccasion = true) => {
     const exactMatches = inSeasonGarments.filter(
       (g) => g.category === cat && (!strictOccasion || g.type === occasion)
@@ -144,7 +245,11 @@ export function generateOfflineOutfits({
     return inSeasonGarments.filter((g) => g.category === cat);
   };
 
-  const tops = filterByCategory('top', true);
+  const allTops = filterByCategory('top', true);
+  // Partition tops into base layers (t-shirts, shirts) and mid layers (jumpers, sweaters, hoodies, cardigans)
+  const baseTops = allTops.filter((g) => inferLayerRole(g) === 'base');
+  const midTops = allTops.filter((g) => inferLayerRole(g) === 'mid');
+
   const bottoms = filterByCategory('bottom', true);
   const onePieces = inSeasonGarments.filter(
     (g) => g.category === 'one-piece' && (g.type === occasion || occasion === 'dress-up')
@@ -153,39 +258,55 @@ export function generateOfflineOutfits({
   const shoesList = filterByCategory('shoes', true);
   const accessories = filterByCategory('accessory', false);
 
-  const { needOuterwear, forbidOuterwear } = shouldIncludeOuterwear(weatherData, activeSeason);
-
   const candidateCombinations = [];
 
-  // Helper to finalize a combination of garment objects
   const addCombo = (items, baseScore, styleLabel) => {
     const uniqueItems = [];
     const seenIds = new Set();
 
-    // If anchorItem exists, ensure it's included and replaces its own category slot (unless accessory)
     if (anchorItem) {
       uniqueItems.push(anchorItem);
       seenIds.add(anchorItem.id);
     }
+
+    const anchorRole = anchorItem ? inferLayerRole(anchorItem) : null;
 
     for (const it of items) {
       if (!it || seenIds.has(it.id)) continue;
       if (forbidOuterwear && it.category === 'outerwear' && (!anchorItem || anchorItem.id !== it.id)) {
         continue;
       }
-      // Avoid two tops or two bottoms if anchorItem already occupies that category
+      if (forbidMidLayer && it.category === 'top' && inferLayerRole(it) === 'mid' && (!anchorItem || anchorItem.id !== it.id)) {
+        continue;
+      }
+
+      // If anchorItem is a non-top category (e.g. bottom, shoes, outerwear, one-piece), don't add a second item of the same category
       if (
         anchorItem &&
         it.category === anchorItem.category &&
-        ['top', 'bottom', 'one-piece', 'shoes', 'outerwear'].includes(it.category)
+        ['bottom', 'one-piece', 'shoes', 'outerwear'].includes(it.category)
       ) {
         continue;
       }
+
+      // For tops: allow 1 'base' top + 1 'mid' top in layered outfits, but never two 'base' tops or two 'mid' tops
+      if (it.category === 'top') {
+        const itRole = inferLayerRole(it);
+        const alreadyHasSameRoleTop = uniqueItems.some(
+          (u) => u.category === 'top' && inferLayerRole(u) === itRole
+        );
+        if (alreadyHasSameRoleTop) {
+          // Exception: if needMidLayer is true and all tops had the same role, allow a second top only if no mid top exists
+          if (!(needMidLayer && midTops.length === 0 && uniqueItems.filter((u) => u.category === 'top').length < 2)) {
+            continue;
+          }
+        }
+      }
+
       uniqueItems.push(it);
       seenIds.add(it.id);
     }
 
-    // Must have at least 2 garments to form an outfit
     if (uniqueItems.length < 2) return;
 
     const key = uniqueItems
@@ -202,28 +323,49 @@ export function generateOfflineOutfits({
     });
   };
 
-  // Strategy A: One-piece outfits (especially for dress-up or if anchor is one-piece)
+  // Strategy A: One-piece outfits
   const effectiveOnePieces =
     anchorItem && anchorItem.category === 'one-piece' ? [anchorItem] : onePieces;
 
   for (const dress of effectiveOnePieces) {
+    const midLayer = !forbidMidLayer && needMidLayer && midTops.length > 0 ? midTops[0] : null;
     const shoe = shoesList[0] || null;
     const coat = !forbidOuterwear && needOuterwear && outerwearList.length > 0 ? outerwearList[0] : null;
     const acc = accessories[0] || null;
-    const comboItems = [dress, shoe, coat, acc].filter(Boolean);
-    const score = 85 + (dress.type === occasion ? 20 : 0);
+    const comboItems = [dress, midLayer, coat, shoe, acc].filter(Boolean);
+    const score = 115 + (dress.type === occasion ? 35 : 0);
     addCombo(comboItems, score, 'Refined Silhouette');
   }
 
-  // Strategy B: Top + Bottom combinations
-  const candidateTops = anchorItem && anchorItem.category === 'top' ? [anchorItem] : tops;
+  // Strategy B: Top(s) + Bottom combinations (with automatic Base + Mid layering in winter/cold weather)
+  const primaryTops =
+    anchorItem && anchorItem.category === 'top'
+      ? [anchorItem]
+      : baseTops.length > 0
+        ? baseTops
+        : allTops;
+
   const candidateBottoms = anchorItem && anchorItem.category === 'bottom' ? [anchorItem] : bottoms;
 
-  for (let tIdx = 0; tIdx < candidateTops.length; tIdx++) {
-    const top = candidateTops[tIdx];
+  for (let tIdx = 0; tIdx < primaryTops.length; tIdx++) {
+    const primaryTop = primaryTops[tIdx];
+    const primaryRole = inferLayerRole(primaryTop);
+
     for (let bIdx = 0; bIdx < candidateBottoms.length; bIdx++) {
       const bottom = candidateBottoms[bIdx];
-      let score = scorePairHarmony(top, bottom, occasion);
+      let score = scorePairHarmony(primaryTop, bottom, occasion, tempBand);
+
+      // Determine complimentary second top layer (e.g. Base Tee + Mid Jumper in winter/cold)
+      let secondTopLayer = null;
+      if (needMidLayer && !forbidMidLayer) {
+        if (primaryRole === 'base' && midTops.length > 0) {
+          secondTopLayer = midTops[(tIdx + bIdx) % midTops.length];
+          score += 18;
+        } else if (primaryRole === 'mid' && baseTops.length > 0) {
+          secondTopLayer = baseTops[(tIdx + bIdx) % baseTops.length];
+          score += 18;
+        }
+      }
 
       const shoe = shoesList.length > 0 ? shoesList[(tIdx + bIdx) % shoesList.length] : null;
       let coat = null;
@@ -235,13 +377,19 @@ export function generateOfflineOutfits({
       }
 
       const acc = accessories.length > 0 && tIdx % 2 === 0 ? accessories[0] : null;
-      const items = [top, bottom, coat, shoe, acc].filter(Boolean);
+      // Order base layer before mid layer
+      const orderedTops =
+        secondTopLayer && primaryRole === 'mid'
+          ? [secondTopLayer, primaryTop]
+          : [primaryTop, secondTopLayer].filter(Boolean);
+
+      const items = [...orderedTops, bottom, coat, shoe, acc].filter(Boolean);
       const label =
         occasion === 'gym'
           ? 'Active Training Set'
           : occasion === 'dress-up'
             ? 'Elevated Evening Edit'
-            : coat
+            : secondTopLayer || coat
               ? `Layered ${activeSeason.charAt(0).toUpperCase() + activeSeason.slice(1)} Look`
               : 'Smart Everyday Essentials';
 
@@ -249,7 +397,6 @@ export function generateOfflineOutfits({
     }
   }
 
-  // Sort by highest harmony score and pick up to 3 diverse outfits
   candidateCombinations.sort((a, b) => b.score - a.score);
   const topOutfits = candidateCombinations.slice(0, 3);
 
@@ -272,6 +419,8 @@ export function generateOfflineOutfits({
   const formattedOutfits = topOutfits.map((combo, idx) => {
     const names = combo.items.map((g) => g.name);
     const hasCoat = combo.items.some((g) => g.category === 'outerwear');
+    const topItems = combo.items.filter((g) => g.category === 'top');
+    const hasMidLayer = topItems.length >= 2 || topItems.some((g) => inferLayerRole(g) === 'mid');
     const title = titles[idx] || `${combo.styleLabel} #${idx + 1}`;
 
     const weatherClause =
@@ -283,9 +432,14 @@ export function generateOfflineOutfits({
       ? ` Built directly around your pinned ${anchorItem.name}.`
       : '';
 
-    const explanation = `Combines ${names.join(' + ')} for a cohesive ${activeSeason} ${occasion} look with balanced color harmony and clean proportions.${anchorClause}${weatherClause}`;
+    const layerClause =
+      topItems.length >= 2
+        ? ` Features smart thermal multi-layering (${topItems.map((t) => t.name).join(' under/over ')}) for ${tempBand} conditions.`
+        : '';
 
-    const layeringTips = buildLayeringTip(weatherData, activeSeason, hasCoat, combo.items);
+    const explanation = `Combines ${names.join(' + ')} for a cohesive ${activeSeason} ${occasion} look with balanced color harmony and clean proportions.${layerClause}${anchorClause}${weatherClause}`;
+
+    const layeringTips = buildLayeringTip(weatherData, activeSeason, hasMidLayer, hasCoat, combo.items);
 
     return {
       id: `offline_outfit_${idx + 1}_${Date.now()}`,
@@ -294,7 +448,8 @@ export function generateOfflineOutfits({
       explanation,
       layeringTips,
       occasion,
-      season: activeSeason
+      season: activeSeason,
+      tempBand
     };
   });
 
@@ -306,5 +461,8 @@ export function generateOfflineOutfits({
 }
 
 export default {
+  inferLayerRole,
+  inferTempSuitability,
+  isGarmentTempCompatible,
   generateOfflineOutfits
 };

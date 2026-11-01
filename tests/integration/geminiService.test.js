@@ -72,6 +72,8 @@ describe('Gemini AI Integration: Vision Auto-Tagger & Stylist Service', () => {
       expect(schema.properties).toBeDefined();
       expect(schema.properties.category).toBeDefined();
       expect(schema.properties.season).toBeDefined();
+      expect(schema.properties.tempSuitability).toBeDefined();
+      expect(schema.properties.layerRole).toBeDefined();
       expect(schema.properties.colorGroup).toBeDefined();
       expect(schema.properties.delicate).toBeDefined();
       expect(schema.properties.type).toBeDefined();

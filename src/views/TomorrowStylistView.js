@@ -304,13 +304,21 @@ export class TomorrowStylistView {
             garments: outfitGarments
           },
           onConfirmWear: async (selectedWashIds) => {
+            const allOutfitIds = outfitGarments.map((g) => g.id);
+            const washSet = new Set(selectedWashIds || []);
+            const keepCleanWornIds = allOutfitIds.filter((id) => !washSet.has(id));
+
             if (selectedWashIds && selectedWashIds.length > 0) {
-              await wardrobeDb.markGarmentsWorn(selectedWashIds);
+              await wardrobeDb.markGarmentsWorn(selectedWashIds, null, true);
             }
+            if (keepCleanWornIds.length > 0) {
+              await wardrobeDb.markGarmentsWorn(keepCleanWornIds, null, false);
+            }
+
             await wardrobeDb.addOutfitHistory({
               outfitId: outfit.id,
               title: outfit.title,
-              garmentIds: outfitGarments.map((g) => g.id),
+              garmentIds: allOutfitIds,
               explanation: outfit.explanation,
               layeringTips: outfit.layeringTips,
               occasion: this.occasion
