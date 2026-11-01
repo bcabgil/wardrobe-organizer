@@ -1,0 +1,476 @@
+/**
+ * views.css - View-specific layouts for Gallery, Add Garment, Tomorrow Stylist, Laundry & Backup Settings
+ */
+
+/* Gallery View */
+.season-banner {
+  background: linear-gradient(135deg, #1f222b 0%, #171920 100%);
+  border: 1px solid rgba(229, 195, 145, 0.25);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.season-kicker {
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  color: var(--accent-gold);
+  font-weight: 700;
+}
+
+.season-heading {
+  margin: 2px 0;
+  font-size: 1.2rem;
+}
+
+.season-sub {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.btn-season-switch {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.chip-scroll-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.chip-scroll-row::-webkit-scrollbar {
+  display: none;
+}
+
+.filter-chip {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.filter-chip.active {
+  background: var(--accent-gold);
+  color: #121316;
+  border-color: var(--accent-gold);
+}
+
+.garment-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+@media (min-width: 600px) {
+  .garment-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.empty-state-card {
+  grid-column: 1 / -1;
+  background: var(--bg-surface);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 32px 20px;
+  text-align: center;
+}
+
+.empty-icon {
+  font-size: 2.2rem;
+  margin-bottom: 8px;
+}
+
+/* Add Garment View */
+.media-upload-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 480px) {
+  .media-upload-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.media-upload-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.media-picker-label {
+  cursor: pointer;
+}
+
+.media-preview-slot {
+  aspect-ratio: 4 / 3;
+  background: var(--bg-elevated);
+  border: 1.5px dashed rgba(229, 195, 145, 0.4);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
+  overflow: hidden;
+}
+
+.upload-preview-img,
+.upload-preview-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.upload-icon {
+  font-size: 1.8rem;
+  margin-bottom: 4px;
+}
+
+.upload-hint {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+.sr-only-input {
+  display: none;
+}
+
+.btn-ai-tag {
+  background: var(--accent-gold-dim);
+  color: var(--accent-gold);
+  border: 1px solid var(--accent-gold);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.btn-ai-tag:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Tomorrow Stylist View */
+.weather-card {
+  background: linear-gradient(135deg, #1b2432 0%, #171a22 100%);
+  border: 1px solid rgba(147, 197, 253, 0.25);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.weather-icon {
+  font-size: 2rem;
+}
+
+.weather-title {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #93c5fd;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.weather-summary {
+  font-size: 0.88rem;
+  color: var(--text-primary);
+}
+
+.stylist-controls {
+  margin-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.outfits-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.engine-badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent-gold-dim);
+  color: var(--accent-gold);
+}
+
+.outfit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.outfit-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.outfit-kicker {
+  font-size: 0.68rem;
+  color: var(--accent-gold);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.outfit-title {
+  margin: 2px 0 0;
+  font-size: 1.1rem;
+}
+
+.outfit-pieces-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+}
+
+.outfit-piece-item {
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  text-align: center;
+}
+
+.outfit-piece-thumb {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: #14161b;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+.outfit-piece-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.btn-preview-fit {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background: rgba(18, 19, 22, 0.88);
+  color: var(--accent-gold);
+  border: 1px solid var(--accent-gold);
+  border-radius: 6px;
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.outfit-piece-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.outfit-piece-cat {
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+}
+
+.outfit-rationale {
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-size: 0.86rem;
+}
+
+.outfit-rationale p {
+  margin: 0 0 6px;
+}
+
+.outfit-rationale p:last-child {
+  margin-bottom: 0;
+}
+
+.outfit-inline-video {
+  width: 100%;
+  max-height: 300px;
+  border-radius: 8px;
+  background: #000;
+}
+
+/* Laundry View */
+.laundry-baskets-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.laundry-basket-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.laundry-basket-title {
+  margin: 0;
+  font-size: 1.02rem;
+}
+
+.laundry-basket-sub {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+}
+
+.basket-count-pill {
+  background: var(--bg-elevated);
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+}
+
+.laundry-item-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.laundry-item-row {
+  background: var(--bg-elevated);
+  border-radius: 8px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.laundry-item-meta {
+  display: block;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+.btn-single-clean {
+  background: var(--status-clean-bg);
+  color: var(--status-clean);
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Settings & Backup View */
+.settings-card {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.storage-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.metric-box {
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  padding: 10px 6px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+}
+
+.metric-val {
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: var(--accent-gold);
+}
+
+.metric-label {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.backup-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (max-width: 480px) {
+  .backup-actions-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wear-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wear-check-item {
+  background: var(--bg-elevated);
+  padding: 10px 12px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}

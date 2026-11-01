@@ -1,0 +1,9 @@
+# Local & agent scratch files
+.agents/
+__pycache__/
+*.pyc
+out_dom.txt
+.DS_Store
+Thumbs.db
+.env
+.env.local

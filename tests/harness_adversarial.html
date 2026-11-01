@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Adversarial Storage Stress Harness</title>
+</head>
+<body>
+  <h1>Adversarial Storage Stress Suite</h1>
+  <div id="status">Running...</div>
+  <pre id="output"></pre>
+
+  <script type="module">
+    console.log("[HARNESS] Script module starting...");
+    try {
+      const { testRunner } = await import('./test-framework.js');
+      console.log("[HARNESS] testRunner imported successfully");
+
+      await import('./unit/storageAdversarial.test.js');
+      console.log("[HARNESS] storageAdversarial.test.js imported successfully");
+
+      const results = await testRunner.run();
+      console.log("[HARNESS] testRunner.run() finished with status: " + results.status);
+
+      const jsonStr = JSON.stringify(results);
+      document.getElementById('status').textContent = 'Done: ' + results.status;
+      document.getElementById('output').textContent = JSON.stringify(results.summary, null, 2);
+
+      console.log('__TEST_RESULTS_JSON_START__' + jsonStr + '__TEST_RESULTS_JSON_END__');
+    } catch (err) {
+      console.error("[HARNESS FATAL ERROR]:", err.message, err.stack);
+      const failPayload = JSON.stringify({
+        status: 'failed',
+        error: String(err) + '\n' + (err.stack || ''),
+        summary: { total: 0, passed: 0, failed: 1, skipped: 0 }
+      });
+      console.log('__TEST_RESULTS_JSON_START__' + failPayload + '__TEST_RESULTS_JSON_END__');
+    }
+  </script>
+</body>
+</html>

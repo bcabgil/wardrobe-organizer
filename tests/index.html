@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Wardrobe Organizer & AI Fashion Stylist — Test Suite</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card-bg: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --text-muted: #8b949e;
+      --heading: #f0f6fc;
+      --accent: #58a6ff;
+      --pass: #3fb950;
+      --pass-bg: rgba(63, 185, 80, 0.15);
+      --fail: #f85149;
+      --fail-bg: rgba(248, 81, 73, 0.15);
+      --skip: #d29922;
+      --skip-bg: rgba(210, 153, 34, 0.15);
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.5;
+      padding: 20px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    header {
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: var(--heading);
+      letter-spacing: -0.02em;
+    }
+
+    .badge {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 4px 8px;
+      border-radius: 12px;
+      letter-spacing: 0.05em;
+    }
+
+    .badge-running { background: var(--accent); color: #fff; }
+    .badge-passed { background: var(--pass); color: #fff; }
+    .badge-failed { background: var(--fail); color: #fff; }
+
+    /* Dashboard Metrics */
+    .dashboard {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: var(--heading);
+      font-family: var(--font-mono);
+    }
+
+    .stat-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    .stat-pass .stat-value { color: var(--pass); }
+    .stat-fail .stat-value { color: var(--fail); }
+    .stat-skip .stat-value { color: var(--skip); }
+    .stat-assertions .stat-value { color: var(--accent); }
+
+    /* Progress bar */
+    .progress-track {
+      width: 100%;
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--pass);
+      transition: width 0.3s ease;
+    }
+
+    .progress-fill.has-failure {
+      background: var(--fail);
+    }
+
+    /* Filters & Controls */
+    .controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .filter-group {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 0.8rem;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .btn:hover { background: #21262d; }
+    .btn.active {
+      background: #388bfd33;
+      border-color: var(--accent);
+      color: var(--heading);
+    }
+
+    /* Suite Container */
+    .suites-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .suite-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .suite-header {
+      padding: 10px 14px;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: var(--heading);
+    }
+
+    .suite-counts {
+      display: flex;
+      gap: 8px;
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+    }
+
+    .count-tag {
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .count-pass { background: var(--pass-bg); color: var(--pass); }
+    .count-fail { background: var(--fail-bg); color: var(--fail); }
+    .count-skip { background: var(--skip-bg); color: var(--skip); }
+
+    .test-list {
+      list-style: none;
+    }
+
+    .test-item {
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 0.85rem;
+    }
+
+    .test-item:last-child {
+      border-bottom: none;
+    }
+
+    .test-main {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .test-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+    }
+
+    .icon-pass { color: var(--pass); font-weight: bold; }
+    .icon-fail { color: var(--fail); font-weight: bold; }
+    .icon-skip { color: var(--skip); font-weight: bold; }
+
+    .test-meta {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .test-skip-reason {
+      margin-left: 20px;
+      font-size: 0.75rem;
+      color: var(--skip);
+      font-style: italic;
+    }
+
+    .test-error-box {
+      margin-top: 6px;
+      margin-left: 20px;
+      background: #231215;
+      border-left: 3px solid var(--fail);
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: #ff7b72;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+
+    /* Structured Hidden Container for DOM Inspection */
+    #test-results {
+      padding: 12px;
+      margin-top: 20px;
+      background: #000;
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="title-row">
+        <div>
+          <h1>Wardrobe Organizer & AI Fashion Stylist</h1>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">
+            4-Tier Progressive E2E & Unit Test Runner
+          </p>
+        </div>
+        <div id="status-badge" class="badge badge-running">Running...</div>
+      </div>
+    </header>
+
+    <div class="dashboard">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-total">0</div>
+        <div class="stat-label">Total Tests</div>
+      </div>
+      <div class="stat-card stat-assertions">
+        <div class="stat-value" id="stat-assertions">0</div>
+        <div class="stat-label">Assertions</div>
+      </div>
+      <div class="stat-card stat-pass">
+        <div class="stat-value" id="stat-passed">0</div>
+        <div class="stat-label">Passed</div>
+      </div>
+      <div class="stat-card stat-fail">
+        <div class="stat-value" id="stat-failed">0</div>
+        <div class="stat-label">Failed</div>
+      </div>
+      <div class="stat-card stat-skip">
+        <div class="stat-value" id="stat-skipped">0</div>
+        <div class="stat-label">Skipped</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-time">0s</div>
+        <div class="stat-label">Time</div>
+      </div>
+    </div>
+
+    <div class="progress-track">
+      <div id="progress-bar" class="progress-fill"></div>
+    </div>
+
+    <div class="controls">
+      <div class="filter-group">
+        <button class="btn active" data-filter="all">All</button>
+        <button class="btn" data-filter="failed">Failed Only</button>
+        <button class="btn" data-filter="passed">Passed Only</button>
+        <button class="btn" data-filter="skipped">Skipped Only</button>
+      </div>
+      <div style="font-size: 0.8rem; color: var(--text-muted);" id="run-info">
+        Loading test suites...
+      </div>
+    </div>
+
+    <div id="suites-container" class="suites-list"></div>
+
+    <!-- Machine-readable DOM target for headless automation -->
+    <div id="test-results" data-status="pending">
+      Initializing test runner...
+    </div>
+  </div>
+
+  <script type="module">
+    import { testRunner } from './test-framework.js';
+
+    // List of test suites
+    const SUITE_FILES = [
+      './unit/wardrobeDb.test.js',
+      './unit/mediaUtils.test.js',
+      './unit/eventBus.test.js',
+      './unit/jszip.test.js',
+      './unit/backup.test.js',
+      './unit/offlineStylist.test.js',
+      './unit/weatherService.test.js',
+      './integration/router.test.js',
+      './integration/laundryGrouping.test.js',
+      './integration/uiComponents.test.js',
+      './integration/geminiService.test.js',
+      './e2e/e2e_scenarios.test.js'
+    ];
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const suiteParam = urlParams.get('suite');
+    const filterParam = urlParams.get('filter');
+    const reportPort = urlParams.get('reportPort');
+
+    async function loadSuites() {
+      const runInfo = document.getElementById('run-info');
+      let loadedCount = 0;
+
+      for (const suitePath of SUITE_FILES) {
+        if (suiteParam && !suitePath.toLowerCase().includes(suiteParam.toLowerCase())) {
+          continue;
+        }
+        try {
+          runInfo.textContent = `Loading ${suitePath}...`;
+          await import(suitePath);
+          loadedCount++;
+        } catch (err) {
+          console.error(`Failed to load suite ${suitePath}:`, err);
+        }
+      }
+      runInfo.textContent = `${loadedCount} suites registered. Executing...`;
+    }
+
+    function renderResults(results) {
+      const summary = results.summary;
+      document.getElementById('stat-total').textContent = summary.total;
+      document.getElementById('stat-assertions').textContent = summary.assertions;
+      document.getElementById('stat-passed').textContent = summary.passed;
+      document.getElementById('stat-failed').textContent = summary.failed;
+      document.getElementById('stat-skipped').textContent = summary.skipped;
+      document.getElementById('stat-time').textContent = `${(summary.durationMs / 1000).toFixed(2)}s`;
+
+      const badge = document.getElementById('status-badge');
+      const progressBar = document.getElementById('progress-bar');
+      progressBar.style.width = '100%';
+
+      if (summary.failed > 0) {
+        badge.textContent = 'FAILED';
+        badge.className = 'badge badge-failed';
+        progressBar.classList.add('has-failure');
+      } else {
+        badge.textContent = 'PASSED';
+        badge.className = 'badge badge-passed';
+      }
+
+      document.getElementById('run-info').textContent = 
+        `Completed in ${(summary.durationMs / 1000).toFixed(2)}s with ${summary.assertions} assertions`;
+
+      const container = document.getElementById('suites-container');
+      container.innerHTML = '';
+
+      results.suites.forEach(suite => {
+        const suiteEl = document.createElement('div');
+        suiteEl.className = 'suite-card';
+
+        const headerEl = document.createElement('div');
+        headerEl.className = 'suite-header';
+        headerEl.innerHTML = `
+          <span>${escapeHtml(suite.name)}</span>
+          <div class="suite-counts">
+            ${suite.passed > 0 ? `<span class="count-tag count-pass">✓ ${suite.passed}</span>` : ''}
+            ${suite.failed > 0 ? `<span class="count-tag count-fail">✗ ${suite.failed}</span>` : ''}
+            ${suite.skipped > 0 ? `<span class="count-tag count-skip">○ ${suite.skipped}</span>` : ''}
+          </div>
+        `;
+
+        const listEl = document.createElement('ul');
+        listEl.className = 'test-list';
+
+        suite.tests.forEach(t => {
+          const itemEl = document.createElement('li');
+          itemEl.className = `test-item status-${t.status}`;
+
+          let icon = '✓';
+          let iconClass = 'icon-pass';
+          if (t.status === 'failed') {
+            icon = '✗';
+            iconClass = 'icon-fail';
+          } else if (t.status === 'skipped') {
+            icon = '○';
+            iconClass = 'icon-skip';
+          }
+
+          let extraHtml = '';
+          if (t.status === 'skipped' && t.skipReason) {
+            extraHtml += `<div class="test-skip-reason">Reason: ${escapeHtml(t.skipReason)}</div>`;
+          }
+          if (t.status === 'failed' && t.error) {
+            extraHtml += `
+              <div class="test-error-box">
+                <div><strong>${escapeHtml(t.error.message)}</strong></div>
+                ${t.error.expected ? `<div>Expected: ${escapeHtml(t.error.expected)}</div>` : ''}
+                ${t.error.actual ? `<div>Actual:   ${escapeHtml(t.error.actual)}</div>` : ''}
+                ${t.error.stack ? `<div style="margin-top:6px; opacity:0.7">${escapeHtml(t.error.stack)}</div>` : ''}
+              </div>
+            `;
+          }
+
+          itemEl.innerHTML = `
+            <div class="test-main">
+              <div class="test-name">
+                <span class="${iconClass}">${icon}</span>
+                <span>${escapeHtml(t.name)}</span>
+              </div>
+              <div class="test-meta">
+                ${t.assertionsCount ? `<span>${t.assertionsCount} asserts</span> · ` : ''}
+                <span>${t.durationMs}ms</span>
+              </div>
+            </div>
+            ${extraHtml}
+          `;
+          listEl.appendChild(itemEl);
+        });
+
+        suiteEl.appendChild(headerEl);
+        suiteEl.appendChild(listEl);
+        container.appendChild(suiteEl);
+      });
+
+      // Update machine-readable element
+      const resultsEl = document.getElementById('test-results');
+      resultsEl.setAttribute('data-status', results.status);
+      resultsEl.setAttribute('data-total', String(summary.total));
+      resultsEl.setAttribute('data-passed', String(summary.passed));
+      resultsEl.setAttribute('data-failed', String(summary.failed));
+      resultsEl.setAttribute('data-skipped', String(summary.skipped));
+      resultsEl.setAttribute('data-assertions', String(summary.assertions));
+      resultsEl.setAttribute('data-duration', String(summary.durationMs));
+      resultsEl.textContent = JSON.stringify({
+        status: results.status,
+        summary: summary,
+        timestamp: results.timestamp
+      }, null, 2);
+
+      // Attach to global window
+      window.__TEST_RESULTS__ = results;
+
+      // Also log machine-readable payload for stderr capture in headless environments
+      console.log('__TEST_RESULTS_JSON_START__' + JSON.stringify(results) + '__TEST_RESULTS_JSON_END__');
+    }
+
+    function setupFilters() {
+      const buttons = document.querySelectorAll('.filter-group .btn');
+      buttons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          buttons.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          const filter = btn.getAttribute('data-filter');
+
+          document.querySelectorAll('.test-item').forEach(item => {
+            if (filter === 'all') {
+              item.style.display = '';
+            } else if (item.classList.contains(`status-${filter}`)) {
+              item.style.display = '';
+            } else {
+              item.style.display = 'none';
+            }
+          });
+        });
+      });
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    async function notifyHeadlessRunner(results) {
+      const jsonStr = JSON.stringify(results);
+      const chunkSize = 1000;
+      const totalChunks = Math.ceil(jsonStr.length / chunkSize);
+      for (let i = 0; i < totalChunks; i++) {
+        const chunk = jsonStr.slice(i * chunkSize, (i + 1) * chunkSize);
+        console.log(`__TEST_CHUNK_${i}_${totalChunks}__${chunk}__END_CHUNK__`);
+      }
+      console.log('__TEST_CHUNKS_DONE__');
+      console.log('__TEST_RESULTS_JSON_START__' + jsonStr + '__TEST_RESULTS_JSON_END__');
+      if (reportPort) {
+        try {
+          await fetch(`http://127.0.0.1:${reportPort}/api/test-results`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: jsonStr
+          });
+        } catch (e) {
+          // Reporter port not reachable or blocked by security policy
+        }
+      }
+    }
+
+    async function main() {
+      setupFilters();
+      await loadSuites();
+      const results = await testRunner.run(filterParam);
+      renderResults(results);
+      await notifyHeadlessRunner(results);
+    }
+
+    window.addEventListener('DOMContentLoaded', main);
+  </script>
+</body>
+</html>

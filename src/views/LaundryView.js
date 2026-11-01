@@ -1,0 +1,172 @@
+/**
+ * LaundryView.js - 4-Basket Smart Laundry Segregation & One-Tap Batch Cleaning
+ * Baskets:
+ * 1. Whites — Regular
+ * 2. Whites — Delicate
+ * 3. Coloured — Regular
+ * 4. Coloured — Delicate
+ */
+
+import { wardrobeDb } from '../db/wardrobeDb.js';
+import { eventBus } from '../utils/eventBus.js';
+import { escapeHtml } from '../utils/domUtils.js';
+import { showToast } from '../components/Toast.js';
+
+export class LaundryView {
+  constructor() {
+    this.container = null;
+    this.loads = {
+      whitesRegular: [],
+      whitesDelicate: [],
+      colouredRegular: [],
+      colouredDelicate: []
+    };
+    this._unsub = null;
+  }
+
+  async mount(container) {
+    this.container = container;
+    await this.loadLoads();
+    this.render();
+
+    this._unsub = eventBus.on('laundry:updated', async () => {
+      await this.loadLoads();
+      this.render();
+    });
+  }
+
+  async loadLoads() {
+    this.loads = await wardrobeDb.getLaundryLoads();
+  }
+
+  render() {
+    if (!this.container) return;
+
+    const baskets = [
+      {
+        key: 'whitesRegular',
+        title: 'Whites — Regular Load',
+        subtitle: 'Standard cottons & durable whites (40°C / regular spin)',
+        icon: '⚪',
+        items: this.loads.whitesRegular || []
+      },
+      {
+        key: 'whitesDelicate',
+        title: 'Whites — Delicate Load',
+        subtitle: 'Silk, wool, cashmere & delicate whites (Cold / gentle wash)',
+        icon: '🫧',
+        items: this.loads.whitesDelicate || []
+      },
+      {
+        key: 'colouredRegular',
+        title: 'Coloured — Regular Load',
+        subtitle: 'Everyday coloured clothes, denim & gym wear (30°C)',
+        icon: '🎨',
+        items: this.loads.colouredRegular || []
+      },
+      {
+        key: 'colouredDelicate',
+        title: 'Coloured — Delicate Load',
+        subtitle: 'Delicate knits, wool & dress-up coloured items (Cold / hand wash)',
+        icon: '🧣',
+        items: this.loads.colouredDelicate || []
+      }
+    ];
+
+    const totalDirty = baskets.reduce((acc, b) => acc + b.items.length, 0);
+
+    const basketsHtml = baskets
+      .map((b) => {
+        const count = b.items.length;
+        const listHtml =
+          count === 0
+            ? `<div class="laundry-empty-note">Basket is empty — all clean!</div>`
+            : `<ul class="laundry-item-list">
+                ${b.items
+                  .map(
+                    (g) => `
+                  <li class="laundry-item-row" data-garment-id="${escapeHtml(g.id)}">
+                    <div>
+                      <strong>${escapeHtml(g.name)}</strong>
+                      <span class="laundry-item-meta">${escapeHtml(g.category)} • ${escapeHtml(g.type)}</span>
+                    </div>
+                    <button type="button" class="btn-single-clean" data-single-clean="${escapeHtml(g.id)}">Mark Clean</button>
+                  </li>
+                `
+                  )
+                  .join('')}
+              </ul>`;
+
+        return `
+          <div class="laundry-basket-card card-surface" data-basket="${b.key}">
+            <div class="laundry-basket-header">
+              <div>
+                <h3 class="laundry-basket-title">${b.icon} ${escapeHtml(b.title)} <span class="basket-count-pill">${count}</span></h3>
+                <p class="laundry-basket-sub">${escapeHtml(b.subtitle)}</p>
+              </div>
+              <button type="button" class="btn-primary btn-clean-load" data-clean-basket="${b.key}" ${count === 0 ? 'disabled' : ''}>
+                ✓ Mark Load as Clean
+              </button>
+            </div>
+            ${listHtml}
+          </div>
+        `;
+      })
+      .join('');
+
+    this.container.innerHTML = `
+      <section class="view-section laundry-view">
+        <div class="section-header">
+          <h2>Smart Laundry Baskets</h2>
+          <p class="section-subtitle">
+            ${
+              totalDirty === 0
+                ? '🎉 Every single item in your wardrobe is clean and ready to wear!'
+                : `${totalDirty} garment(s) waiting to be washed, automatically separated by color & fabric care.`
+            }
+          </p>
+        </div>
+
+        <div class="laundry-baskets-grid">
+          ${basketsHtml}
+        </div>
+      </section>
+    `;
+
+    // Bind batch clean buttons
+    this.container.querySelectorAll('[data-clean-basket]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const basketKey = btn.dataset.cleanBasket;
+        const items = this.loads[basketKey] || [];
+        if (items.length === 0) return;
+
+        const ids = items.map((g) => g.id);
+        await wardrobeDb.markGarmentsClean(ids);
+        eventBus.emit('laundry:updated', { cleanedCount: ids.length, basket: basketKey });
+        eventBus.emit('wardrobe:changed', { source: 'laundry_batch_clean' });
+        showToast(`Marked ${ids.length} item(s) as Clean!`, 'success');
+      });
+    });
+
+    // Bind single item clean buttons
+    this.container.querySelectorAll('[data-single-clean]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.singleClean;
+        if (!id) return;
+        await wardrobeDb.markGarmentsClean([id]);
+        eventBus.emit('laundry:updated', { cleanedCount: 1 });
+        eventBus.emit('wardrobe:changed', { source: 'laundry_single_clean' });
+        showToast('Item marked as Clean!', 'success');
+      });
+    });
+  }
+
+  async unmount() {
+    if (typeof this._unsub === 'function') {
+      this._unsub();
+      this._unsub = null;
+    }
+  }
+}
+
+export default LaundryView;

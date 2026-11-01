@@ -1,0 +1,39 @@
+/**
+ * safe-areas.css - iOS Safari (Dynamic Island / Notch / Home Indicator) & Android Gesture Bar Safe Areas
+ */
+
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+.app-header {
+  padding-top: calc(12px + var(--safe-top));
+  padding-left: calc(16px + var(--safe-left));
+  padding-right: calc(16px + var(--safe-right));
+}
+
+.app-main {
+  padding-left: calc(16px + var(--safe-left));
+  padding-right: calc(16px + var(--safe-right));
+  padding-bottom: calc(96px + var(--safe-bottom));
+}
+
+.bottom-nav {
+  padding-bottom: calc(8px + var(--safe-bottom));
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
