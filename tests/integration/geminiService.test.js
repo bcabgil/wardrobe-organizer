@@ -92,6 +92,67 @@ describe('Gemini AI Integration: Vision Auto-Tagger & Stylist Service', () => {
     }
   });
 
+  it('T1-GEM-04: analyzeGarmentPhoto sends both photo and fit video payload to Gemini Vision', async () => {
+    if (!geminiMod) return;
+
+    const analyze = geminiMod.analyzeGarmentPhoto || geminiMod.default?.analyzeGarmentPhoto;
+    expect(typeof analyze).toBe('function');
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 40;
+    canvas.height = 40;
+    const photoBlob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg'));
+    const videoBlob = new Blob([new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70])], {
+      type: 'video/mp4'
+    });
+
+    let capturedBody = null;
+    const origFetch = window.fetch;
+    window.fetch = async (url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      name: 'Relaxed Cashmere Jumper',
+                      category: 'top',
+                      season: 'winter',
+                      tempSuitability: 'cold',
+                      layerRole: 'mid',
+                      colorGroup: 'coloured',
+                      delicate: true,
+                      type: 'everyday',
+                      visualDescription: 'Relaxed oversized fit on shoulders with room for a base tee underneath.'
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      };
+    };
+
+    try {
+      const res = await analyze(photoBlob, 'AIzaSyFakeKey', videoBlob);
+      expect(res.engine).toBe('gemini');
+      expect(res.analyzedFitVideo).toBe(true);
+      expect(res.layerRole).toBe('mid');
+      expect(capturedBody).toBeDefined();
+      const parts = capturedBody.contents[0].parts;
+      // 1 text prompt + 1 photo + at least 1 video/keyframe part
+      expect(parts.length).toBeGreaterThanOrEqual(3);
+    } finally {
+      window.fetch = origFetch;
+    }
+  });
+
   // ==========================================
   // TIER 2: ERROR RESILIENCE & OFFLINE FALLBACK
   // ==========================================

@@ -80,6 +80,13 @@ function hasNeutralTone(garment) {
   return NEUTRAL_KEYWORDS.some((kw) => text.includes(kw));
 }
 
+function getFitSilhouette(garment) {
+  const text = `${garment?.name || ''} ${garment?.visualDescription || ''}`.toLowerCase();
+  if (/oversized|relaxed|boxy|chunky|slouchy|wide|loose/i.test(text)) return 'relaxed';
+  if (/slim|tailored|fitted|skinny|structured|tapered|cropped/i.test(text)) return 'fitted';
+  return 'regular';
+}
+
 function scorePairHarmony(itemA, itemB, occasion, targetTempBand) {
   let score = 50;
   if (!itemA || !itemB) return score;
@@ -98,6 +105,13 @@ function scorePairHarmony(itemA, itemB, occasion, targetTempBand) {
   const suitB = inferTempSuitability(itemB);
   if (suitA === targetTempBand) score += 12;
   if (suitB === targetTempBand) score += 12;
+
+  // Fit & body proportion balance bonus (from Fit Video / visualDescription)
+  const fitA = getFitSilhouette(itemA);
+  const fitB = getFitSilhouette(itemB);
+  if ((fitA === 'relaxed' && fitB === 'fitted') || (fitA === 'fitted' && fitB === 'relaxed')) {
+    score += 10;
+  }
 
   return score;
 }

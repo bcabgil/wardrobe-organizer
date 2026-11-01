@@ -5,8 +5,10 @@
 import { escapeHtml, getCategoryIconSvg } from '../utils/domUtils.js';
 import { createSafeVideoPlayer, MediaUrlManager } from '../utils/mediaUtils.js';
 import { wardrobeDb } from '../db/wardrobeDb.js';
+import { analyzeGarmentPhoto } from '../services/ai/geminiService.js';
 import { eventBus } from '../utils/eventBus.js';
 import { showToast } from './Toast.js';
+import { LoadingOverlay } from './LoadingOverlay.js';
 
 export class GarmentModal {
   constructor(options = {}) {
@@ -178,10 +180,13 @@ export class GarmentModal {
                 </label>
               </div>
               <label class="form-label">Update Fit Video (optional)
-                <input type="file" name="newVideo" accept="video/*" class="form-input" />
+                <input type="file" name="newVideo" id="edit-new-video-input" accept="video/*" class="form-input" />
               </label>
-              <label class="form-label">Style / Visual Notes
-                <textarea name="visualDescription" class="form-textarea" rows="2">${escapeHtml(g.visualDescription || '')}</textarea>
+              <button type="button" class="btn-ai-tag" data-action="reanalyze-ai">
+                ✨ Analyze Photo &amp; Fit Video with Gemini Vision
+              </button>
+              <label class="form-label">Style &amp; Fit Proportions Notes
+                <textarea name="visualDescription" class="form-textarea" rows="3">${escapeHtml(g.visualDescription || '')}</textarea>
               </label>
               <div class="modal-edit-actions">
                 <button type="submit" class="btn-primary">Save Changes</button>
@@ -247,6 +252,51 @@ export class GarmentModal {
       showToast(`${g.name} marked clean!`, 'success');
       if (typeof this.onUpdated === 'function') this.onUpdated();
       this.close();
+    });
+
+    // Re-analyze Photo & Fit Video with Gemini Vision inside Edit tab
+    wrapper.querySelector('[data-action="reanalyze-ai"]')?.addEventListener('click', async () => {
+      try {
+        LoadingOverlay.show('Analyzing garment photo & fit video with Gemini Vision...');
+        const settings = await wardrobeDb.getSettings();
+        const photoBlob = g.photoMediaId ? await wardrobeDb.getMediaBlob(g.photoMediaId).catch(() => null) : null;
+        const newVideoInput = wrapper.querySelector('#edit-new-video-input');
+        const uploadedVideoFile = newVideoInput?.files?.[0] || null;
+        const videoBlob =
+          uploadedVideoFile ||
+          (g.videoMediaId ? await wardrobeDb.getMediaBlob(g.videoMediaId).catch(() => null) : null);
+
+        if (!photoBlob && !videoBlob) {
+          LoadingOverlay.hide();
+          showToast('No photo or fit video found on this garment to analyze.', 'error');
+          return;
+        }
+
+        const tagResult = await analyzeGarmentPhoto(photoBlob, settings.geminiApiKey || '', videoBlob);
+        const editFormEl = wrapper.querySelector('#edit-garment-form');
+        if (editFormEl) {
+          if (tagResult.name) editFormEl.querySelector('[name="name"]').value = tagResult.name;
+          if (tagResult.visualDescription) {
+            editFormEl.querySelector('[name="visualDescription"]').value = tagResult.visualDescription;
+          }
+          ['season', 'category', 'layerRole', 'tempSuitability', 'colorGroup', 'type'].forEach((f) => {
+            const sel = editFormEl.querySelector(`[name="${f}"]`);
+            if (sel && tagResult[f]) sel.value = String(tagResult[f]);
+          });
+          const delSel = editFormEl.querySelector('[name="delicate"]');
+          if (delSel && tagResult.delicate !== undefined) delSel.value = String(Boolean(tagResult.delicate));
+        }
+        LoadingOverlay.hide();
+        showToast(
+          tagResult.analyzedFitVideo
+            ? '✨ Updated attributes & fit proportions from Photo + Fit Video! Click Save Changes.'
+            : '✨ Updated attributes with Gemini Vision! Click Save Changes.',
+          'success'
+        );
+      } catch (err) {
+        LoadingOverlay.hide();
+        showToast(`AI analysis failed: ${err.message}`, 'error');
+      }
     });
 
     // Edit form submit

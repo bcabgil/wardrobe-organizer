@@ -199,6 +199,18 @@ export class AddGarmentView {
     const photoPreview = this.container.querySelector('#photo-preview-slot');
     const autoTagBtn = this.container.querySelector('#btn-ai-autotag');
 
+    const updateAutoTagButtonState = () => {
+      if (!autoTagBtn) return;
+      autoTagBtn.disabled = !(this.photoFile || this.videoFile);
+      if (this.photoFile && this.videoFile) {
+        autoTagBtn.textContent = '✨ Auto-Fill with Gemini Vision (Photo + Fit Video)';
+      } else if (this.videoFile) {
+        autoTagBtn.textContent = '✨ Auto-Fill with Gemini Vision (Fit Video)';
+      } else {
+        autoTagBtn.textContent = '✨ Auto-Fill with Gemini Vision';
+      }
+    };
+
     photoInput?.addEventListener('change', (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -207,9 +219,7 @@ export class AddGarmentView {
       if (photoPreview) {
         photoPreview.innerHTML = `<img src="${previewUrl}" alt="Selected Garment Preview" class="upload-preview-img" />`;
       }
-      if (autoTagBtn) {
-        autoTagBtn.disabled = false;
-      }
+      updateAutoTagButtonState();
     });
 
     // Fit Video input
@@ -227,15 +237,24 @@ export class AddGarmentView {
         player.className = 'upload-preview-video';
         videoPreview.appendChild(player);
       }
+      updateAutoTagButtonState();
     });
 
     // AI Auto-Tag button
     autoTagBtn?.addEventListener('click', async () => {
-      if (!this.photoFile) return;
+      if (!this.photoFile && !this.videoFile) return;
       try {
-        LoadingOverlay.show('Analyzing garment photo with AI...');
+        LoadingOverlay.show(
+          this.videoFile
+            ? 'Analyzing garment photo & fit video proportions with AI...'
+            : 'Analyzing garment photo with AI...'
+        );
         const settings = await wardrobeDb.getSettings();
-        const tagResult = await analyzeGarmentPhoto(this.photoFile, settings.geminiApiKey || '');
+        const tagResult = await analyzeGarmentPhoto(
+          this.photoFile,
+          settings.geminiApiKey || '',
+          this.videoFile
+        );
 
         // Populate form fields
         const nameInput = this.container.querySelector('#garment-name-input');
@@ -257,7 +276,9 @@ export class AddGarmentView {
 
         showToast(
           tagResult.engine === 'gemini'
-            ? '✨ Auto-filled attributes with Gemini Vision!'
+            ? tagResult.analyzedFitVideo
+              ? '✨ Auto-filled attributes & on-body fit profile from Photo + Fit Video!'
+              : '✨ Auto-filled attributes with Gemini Vision!'
             : 'Auto-filled attributes (Configure Gemini API Key in Backup/Settings for full AI Vision)',
           'success'
         );

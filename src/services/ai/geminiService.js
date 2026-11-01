@@ -6,7 +6,7 @@
  * - Automatic resilience fallback to offlineStylist on missing API key or HTTP/network errors.
  */
 
-import { optimizeImageForGemini } from './imageOptimizer.js';
+import { optimizeImageForGemini, extractVideoKeyframes } from './imageOptimizer.js';
 import { generateOfflineOutfits, inferLayerRole, inferTempSuitability } from './offlineStylist.js';
 
 export const GEMINI_MODEL = 'gemini-3.8-flash';
@@ -260,29 +260,60 @@ export function cleanJsonOutput(rawOutput) {
 }
 
 /**
- * Analyze a garment photo with Gemini 2.5 Flash Vision to auto-populate attributes
+ * Analyze a garment photo (and optional fit video) with Gemini Vision to auto-populate attributes
  * Falls back to a local heuristic analyzer if no API key is set.
- * @param {Blob|File} imageBlob
+ * @param {Blob|File|null} imageBlob
  * @param {string} [apiKey='']
+ * @param {Blob|File|null} [videoBlob=null]
  * @returns {Promise<Object>}
  */
-export async function analyzeGarmentPhoto(imageBlob, apiKey = '') {
-  if (!imageBlob) {
-    throw new Error('analyzeGarmentPhoto: Image Blob is required');
+export async function analyzeGarmentPhoto(imageBlob, apiKey = '', videoBlob = null) {
+  if (!imageBlob && !videoBlob) {
+    throw new Error('analyzeGarmentPhoto: Image or Fit Video Blob is required');
   }
 
   const trimmedKey = String(apiKey || '').trim();
   if (!trimmedKey) {
-    return fallbackHeuristicPhotoAnalysis(imageBlob);
+    return fallbackHeuristicPhotoAnalysis(imageBlob || videoBlob, '', Boolean(videoBlob));
   }
 
   try {
-    const optimized = await optimizeImageForGemini(imageBlob);
-    const endpoint = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
+    const mediaParts = [];
+    if (imageBlob) {
+      const optimized = await optimizeImageForGemini(imageBlob);
+      mediaParts.push({
+        inlineData: {
+          mimeType: optimized.mimeType,
+          data: optimized.base64
+        }
+      });
+    }
+
+    let videoFramesCount = 0;
+    if (videoBlob) {
+      const frames = await extractVideoKeyframes(videoBlob);
+      for (const frame of frames) {
+        if (frame && frame.base64) {
+          mediaParts.push({
+            inlineData: {
+              mimeType: frame.mimeType || 'image/jpeg',
+              data: frame.base64
+            }
+          });
+          videoFramesCount++;
+        }
+      }
+    }
+
+    if (mediaParts.length === 0) {
+      return fallbackHeuristicPhotoAnalysis(imageBlob || videoBlob, 'No media frames decoded', Boolean(videoBlob));
+    }
 
     const prompt = [
-      'You are an expert fashion archivist and laundry care specialist.',
-      'Analyze this garment image and return a JSON object matching the schema:',
+      'You are an expert fashion archivist, tailor, and laundry care specialist.',
+      videoFramesCount > 0
+        ? `Analyze this garment photo AND the ${videoFramesCount} fit-video frame(s) showing how the garment actually fits and drapes on the wearer's body.`
+        : 'Analyze this garment image and return a JSON object matching the schema:',
       '- name: short stylish title (e.g. "Charcoal Merino Sweater", "White Cotton Oxford")',
       '- category: one of "top", "bottom", "outerwear", "one-piece", "shoes", "accessory"',
       '- season: one of "winter", "summer", "all-season"',
@@ -291,24 +322,18 @@ export async function analyzeGarmentPhoto(imageBlob, apiKey = '') {
       '- colorGroup: "whites" if predominantly white/cream/ivory for laundry sorting, otherwise "coloured"',
       '- delicate: true if knitwear, wool, silk, linen, cashmere, sheer, or tailored; false if durable cotton/denim/synthetics',
       '- type: one of "everyday", "gym", "dress-up"',
-      '- visualDescription: concise description of colors, pattern, silhouette, and fabric for an AI outfit stylist.'
+      videoFramesCount > 0
+        ? '- visualDescription: concise description of exact colors, fabric texture, AND how the garment fits on the wearer\'s body in the fit video (e.g., relaxed/oversized vs slim/tailored cut, cropped vs long hem placement, drape, and room for layering underneath/over).'
+        : '- visualDescription: concise description of colors, pattern, silhouette, and fabric for an AI outfit stylist.'
     ].join('\n');
 
-    const { data, modelName } = await callGeminiGenerateContent({
+    const { data } = await callGeminiGenerateContent({
       apiKey: trimmedKey,
       temperature: 0.2,
       responseSchema: AUTO_TAG_SCHEMA,
       contents: [
         {
-          parts: [
-            { text: prompt },
-            {
-              inlineData: {
-                mimeType: optimized.mimeType,
-                data: optimized.base64
-              }
-            }
-          ]
+          parts: [{ text: prompt }, ...mediaParts]
         }
       ]
     });
@@ -334,14 +359,15 @@ export async function analyzeGarmentPhoto(imageBlob, apiKey = '') {
       delicate: Boolean(parsed.delicate),
       type: ['everyday', 'gym', 'dress-up'].includes(parsed.type) ? parsed.type : 'everyday',
       visualDescription: parsed.visualDescription || '',
+      analyzedFitVideo: videoFramesCount > 0,
       engine: 'gemini'
     };
   } catch (err) {
-    return fallbackHeuristicPhotoAnalysis(imageBlob, err.message);
+    return fallbackHeuristicPhotoAnalysis(imageBlob || videoBlob, err.message, Boolean(videoBlob));
   }
 }
 
-async function fallbackHeuristicPhotoAnalysis(imageBlob, reason = '') {
+async function fallbackHeuristicPhotoAnalysis(imageBlob, reason = '', hasFitVideo = false) {
   // Inspect filename or canvas brightness if available
   const fileName = (imageBlob && imageBlob.name) ? imageBlob.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ') : '';
   const lower = fileName.toLowerCase();
@@ -396,14 +422,15 @@ async function fallbackHeuristicPhotoAnalysis(imageBlob, reason = '') {
     colorGroup: isWhite ? 'whites' : 'coloured',
     delicate,
     type,
-    visualDescription: `Auto-detected ${season} ${category} (${isWhite ? 'light/white tones' : 'coloured palette'}).`,
+    visualDescription: `Auto-detected ${season} ${category} (${isWhite ? 'light/white tones' : 'coloured palette'})${hasFitVideo ? ' with attached fit-video drape & body proportion reference.' : '.'}`,
+    analyzedFitVideo: Boolean(hasFitVideo),
     engine: 'offline',
     fallbackReason: reason || 'No Gemini API key configured'
   };
 }
 
 /**
- * Generate 2-3 curated outfit suggestions for tomorrow using Gemini 2.5 Flash
+ * Generate 2-3 curated outfit suggestions for tomorrow using Google Gemini AI
  * Automatically falls back to offlineStylist on missing API key or API/network failure.
  * @param {Object} params
  * @returns {Promise<{ outfits: Array<Object>, engine: 'gemini'|'offline', message?: string }>}
@@ -448,6 +475,7 @@ export async function suggestTomorrowOutfits({
       layerRole: inferLayerRole(g),
       colorGroup: g.colorGroup,
       type: g.type,
+      hasFitVideo: Boolean(g.videoMediaId),
       visualDescription: g.visualDescription || ''
     }));
 
@@ -465,14 +493,15 @@ export async function suggestTomorrowOutfits({
       `Target Occasion: "${occasion}"`,
       `Active Season: "${activeSeason}"`,
       `Weather Context: "${weatherContextStr}"`,
-      'MULTI-LAYERING & TEMPERATURE SUITABILITY RULES:',
+      'MULTI-LAYERING, TEMPERATURE SUITABILITY & FIT-VIDEO PROPORTION RULES:',
       '- In winter or cold/chilly weather (< 16°C), do NOT suggest only a single thin top! Combine a base-layer top (layerRole="base", e.g. t-shirt/shirt) AND a mid-layer top (layerRole="mid", e.g. jumper/sweater/cardigan/hoodie) PLUS a bottom and outerwear/shoes when available.',
       '- Match each garment\'s tempSuitability ("freezing", "cold", "mild", "warm", "all-temps") to the forecast temperature.',
+      '- Pay close attention to each garment\'s fit, cut, and drape notes in `visualDescription` (captured from the user\'s on-body fit videos when `hasFitVideo` is true). Balance silhouettes across layers (e.g., pair relaxed/oversized jumpers or outer layers with cleaner base layers or structured bottoms, and mention how the fit and proportions work on the body in `explanation` and `layeringTips`).',
       anchorItem
         ? `CRITICAL REQUIREMENT: Every single suggested outfit MUST include the anchor garment ID "${anchorItem.id}" (${anchorItem.name}).`
         : 'Combine base/mid tops + bottoms (or one-piece) + optional outerwear/shoes/accessories that harmonize in color and silhouette.',
       'Only use garment IDs that exist in the provided inventory JSON.',
-      'Return a JSON object with shape: { "outfits": [ { "title": "...", "garmentIds": ["..."], "explanation": "Detailed fashion stylist explanation of why the colors, fabrics, and layers work together", "layeringTips": "Specific advice on how to layer and style these pieces for the temperature" } ] }',
+      'Return a JSON object with shape: { "outfits": [ { "title": "...", "garmentIds": ["..."], "explanation": "Detailed fashion stylist explanation of why the colors, fabrics, and on-body fit proportions work together", "layeringTips": "Specific advice on how to layer and style these pieces for the temperature and silhouette" } ] }',
       `Available Clean Inventory JSON:\n${JSON.stringify(inventorySummary, null, 2)}`
     ].join('\n\n');
 
