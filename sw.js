@@ -5,7 +5,7 @@
  * Works 100% autonomously on iPhone and Android when the user's PC is switched off.
  */
 
-const CACHE_NAME = 'wardrobe-organizer-v5';
+const CACHE_NAME = 'wardrobe-organizer-v6';
 
 const APP_SHELL_ASSETS = [
   './',
@@ -90,21 +90,19 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Same-origin App Shell: Cache-First, falling back to network and updating cache
+  // Same-origin App Shell: Network-First so updates appear immediately when online,
+  // with instant fallback to CacheStorage when offline (Airplane mode / PC off)
   event.respondWith(
-    caches.match(request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(request)
-        .then((networkResponse) => {
-          if (networkResponse && networkResponse.status === 200) {
-            const clone = networkResponse.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-          }
-          return networkResponse;
-        })
-        .catch(() => caches.match('./index.html'));
-    })
+    fetch(request)
+      .then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+        }
+        return networkResponse;
+      })
+      .catch(() =>
+        caches.match(request).then((cachedResponse) => cachedResponse || caches.match('./index.html'))
+      )
   );
 });

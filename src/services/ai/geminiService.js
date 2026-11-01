@@ -10,7 +10,71 @@ import { optimizeImageForGemini } from './imageOptimizer.js';
 import { generateOfflineOutfits, inferLayerRole, inferTempSuitability } from './offlineStylist.js';
 
 export const GEMINI_MODEL = 'gemini-2.5-flash';
+export const GEMINI_FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
 export const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+
+async function callGeminiGenerateContent({ apiKey, contents, responseSchema = null, temperature = 0.4 }) {
+  let lastError = null;
+
+  for (const modelName of GEMINI_FALLBACK_MODELS) {
+    const endpoint = `${GEMINI_API_BASE}/${modelName}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const genConfig = {
+      temperature,
+      responseMimeType: 'application/json'
+    };
+    if (responseSchema) {
+      genConfig.responseSchema = responseSchema;
+    }
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents,
+          generationConfig: genConfig
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return { data, modelName };
+      }
+
+      const errText = await response.text().catch(() => '');
+      lastError = new Error(`Gemini (${modelName}) HTTP ${response.status}: ${errText.slice(0, 140) || response.statusText}`);
+
+      // If 400 Bad Request due to responseSchema incompatibility, retry once without responseSchema
+      if (response.status === 400 && responseSchema) {
+        const retryRes = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents,
+            generationConfig: {
+              temperature,
+              responseMimeType: 'application/json'
+            }
+          })
+        });
+        if (retryRes.ok) {
+          const data = await retryRes.json();
+          return { data, modelName };
+        }
+      }
+
+      // If 401/403 invalid API key, don't bother trying other models
+      if (response.status === 401 || response.status === 403) {
+        break;
+      }
+    } catch (networkErr) {
+      lastError = networkErr;
+      break;
+    }
+  }
+
+  throw lastError || new Error('Gemini API request failed');
+}
 
 export const AUTO_TAG_SCHEMA = {
   type: 'OBJECT',
@@ -146,36 +210,25 @@ export async function analyzeGarmentPhoto(imageBlob, apiKey = '') {
       '- visualDescription: concise description of colors, pattern, silhouette, and fabric for an AI outfit stylist.'
     ].join('\n');
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: optimized.mimeType,
-                  data: optimized.base64
-                }
+    const { data, modelName } = await callGeminiGenerateContent({
+      apiKey: trimmedKey,
+      temperature: 0.2,
+      responseSchema: AUTO_TAG_SCHEMA,
+      contents: [
+        {
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType: optimized.mimeType,
+                data: optimized.base64
               }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType: 'application/json',
-          responseSchema: AUTO_TAG_SCHEMA
+            }
+          ]
         }
-      })
+      ]
     });
 
-    if (!response.ok) {
-      throw new Error(`Gemini API HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     const parsed = cleanJsonOutput(rawText);
 
@@ -335,29 +388,17 @@ export async function suggestTomorrowOutfits({
         ? `CRITICAL REQUIREMENT: Every single suggested outfit MUST include the anchor garment ID "${anchorItem.id}" (${anchorItem.name}).`
         : 'Combine base/mid tops + bottoms (or one-piece) + optional outerwear/shoes/accessories that harmonize in color and silhouette.',
       'Only use garment IDs that exist in the provided inventory JSON.',
+      'Return a JSON object with shape: { "outfits": [ { "title": "...", "garmentIds": ["..."], "explanation": "Detailed fashion stylist explanation of why the colors, fabrics, and layers work together", "layeringTips": "Specific advice on how to layer and style these pieces for the temperature" } ] }',
       `Available Clean Inventory JSON:\n${JSON.stringify(inventorySummary, null, 2)}`
     ].join('\n\n');
 
-    const endpoint = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
-
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.5,
-          responseMimeType: 'application/json',
-          responseSchema: OUTFIT_SUGGESTION_SCHEMA
-        }
-      })
+    const { data, modelName } = await callGeminiGenerateContent({
+      apiKey: trimmedKey,
+      temperature: 0.5,
+      responseSchema: OUTFIT_SUGGESTION_SCHEMA,
+      contents: [{ parts: [{ text: prompt }] }]
     });
 
-    if (!response.ok) {
-      throw new Error(`Gemini API HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const data = await response.json();
     const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
     const parsed = cleanJsonOutput(rawText);
 
@@ -414,23 +455,12 @@ export async function testGeminiApiKey(apiKey = '') {
   if (!trimmedKey) {
     throw new Error('Please paste a Gemini API key first.');
   }
-  const endpoint = `${GEMINI_API_BASE}/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(trimmedKey)}`;
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: 'Reply with {"status":"ok"}' }] }],
-      generationConfig: {
-        temperature: 0,
-        responseMimeType: 'application/json'
-      }
-    })
+  const { modelName } = await callGeminiGenerateContent({
+    apiKey: trimmedKey,
+    temperature: 0,
+    contents: [{ parts: [{ text: 'Reply with {"status":"ok"}' }] }]
   });
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '');
-    throw new Error(`HTTP ${response.status}: ${errText.slice(0, 120) || response.statusText}`);
-  }
-  return { ok: true, model: GEMINI_MODEL };
+  return { ok: true, model: modelName };
 }
 
 export default {

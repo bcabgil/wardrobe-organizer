@@ -154,6 +154,14 @@ export class TomorrowStylistView {
     LoadingOverlay.show('Curating tomorrow\'s outfit combinations...');
 
     try {
+      // Always fetch latest settings & garments from IndexedDB in case API key or wardrobe just changed
+      const [latestGarments, latestSettings] = await Promise.all([
+        wardrobeDb.getAllGarments(),
+        wardrobeDb.getSettings()
+      ]);
+      this.garments = latestGarments || [];
+      this.settings = latestSettings || {};
+
       const result = await suggestTomorrowOutfits({
         garments: this.garments,
         occasion: this.occasion,
@@ -188,10 +196,13 @@ export class TomorrowStylistView {
       return;
     }
 
+    const hasApiKey = Boolean(this.settings.geminiApiKey && String(this.settings.geminiApiKey).trim());
     const engineBadge =
       result.engine === 'gemini'
-        ? `<span class="engine-badge engine-gemini">✨ Styled by Google Gemini 2.5 Flash</span>`
-        : `<span class="engine-badge engine-offline">⚡ Smart Rule Stylist (Add Gemini Key in Settings for LLM Vision)</span>`;
+        ? `<span class="engine-badge engine-gemini">✨ Styled by Google Gemini AI</span>`
+        : hasApiKey && result.fallbackReason
+          ? `<span class="engine-badge engine-offline">⚡ Offline Rule Stylist (Gemini Fallback: ${escapeHtml(result.fallbackReason)})</span>`
+          : `<span class="engine-badge engine-offline">⚡ Smart Rule Stylist (Add Gemini Key in Backup/Settings for LLM Styling)</span>`;
 
     const headerBanner = document.createElement('div');
     headerBanner.className = 'stylist-engine-row';
