@@ -87,8 +87,8 @@ export class BackupSettingsView {
             </button>
 
             <button type="button" id="btn-export-json" class="btn-secondary">
-              📄 Export Quick Status (.json)
-              <span class="btn-sub">Lightweight metadata & clean/wash statuses only</span>
+              📄 Export JSON Backup (.json)
+              <span class="btn-sub">Metadata, statuses + ASCII Base64-encoded photos & fit videos</span>
             </button>
           </div>
 

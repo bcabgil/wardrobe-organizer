@@ -110,6 +110,74 @@ describe('Backup & Restore: Pluggable Architecture & Archive Engine', () => {
     expect(parsed.settings).toBeDefined();
   });
 
+  it('T1-BAK-04b: exports and restores photos and fit videos encoded as ASCII Base64 strings in .json backup', async () => {
+    if (!localArchiveMod) return;
+    const dbRes = await safeImport('../../src/db/wardrobeDb.js');
+    if (!dbRes.ok) return;
+    const wardrobeDb = dbRes.module.wardrobeDb || dbRes.module.default;
+
+    const LocalProvider = localArchiveMod.LocalArchiveBackupProvider || localArchiveMod.default;
+    const provider = new LocalProvider();
+
+    await wardrobeDb.clearDatabase();
+
+    const photoBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 99, 100]);
+    const videoBytes = new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112, 109, 112, 52, 50]);
+
+    const photoRec = await wardrobeDb.saveMedia({
+      garmentId: 'ascii_json_g1',
+      type: 'photo',
+      mimeType: 'image/png',
+      data: photoBytes.buffer
+    });
+    const videoRec = await wardrobeDb.saveMedia({
+      garmentId: 'ascii_json_g1',
+      type: 'video',
+      mimeType: 'video/mp4',
+      data: videoBytes.buffer
+    });
+
+    await wardrobeDb.addGarment({
+      id: 'ascii_json_g1',
+      name: 'ASCII Encoded Garment',
+      category: 'top',
+      season: 'winter',
+      colorGroup: 'coloured',
+      delicate: false,
+      status: 'clean',
+      type: 'everyday',
+      photoMediaId: photoRec.id,
+      videoMediaId: videoRec.id
+    });
+
+    const exportResult = await provider.exportMetadataJson();
+    const parsed = JSON.parse(exportResult.jsonString);
+    expect(parsed.mediaMetadata.length).toBe(2);
+
+    for (const m of parsed.mediaMetadata) {
+      expect(m.encoding).toBe('base64_ascii');
+      expect(typeof m.dataBase64).toBe('string');
+      expect(m.dataBase64.length).toBeGreaterThan(0);
+      // Verify purely printable ASCII characters
+      expect(/^[A-Za-z0-9+/=]+$/.test(m.dataBase64)).toBe(true);
+    }
+
+    // Wipe DB and restore strictly from the .json string
+    await wardrobeDb.clearDatabase();
+    const restoreRes = await provider.importBackup(exportResult.jsonString, 'replace');
+    expect(restoreRes.success).toBe(true);
+    expect(restoreRes.mediaCount).toBe(2);
+
+    const restoredPhoto = await wardrobeDb.getMedia(photoRec.id);
+    const restoredVideo = await wardrobeDb.getMedia(videoRec.id);
+    expect(restoredPhoto).toBeDefined();
+    expect(restoredVideo).toBeDefined();
+    expect(Array.from(new Uint8Array(restoredPhoto.data))).toEqual(Array.from(photoBytes));
+    expect(Array.from(new Uint8Array(restoredVideo.data))).toEqual(Array.from(videoBytes));
+
+    await wardrobeDb.clearDatabase();
+  });
+
   it('T1-BAK-05: exports full .zip backup with manifest, wardrobe.json and media directories', async (ctx) => {
     if (!localArchiveMod) return;
 

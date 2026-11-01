@@ -25,6 +25,51 @@ function formatDateStamp(isoDate = new Date().toISOString()) {
   return isoDate.slice(0, 10);
 }
 
+/**
+ * Encode binary ArrayBuffer / TypedArray into an ASCII Base64 string in safe chunks
+ */
+export function arrayBufferToBase64Ascii(buffer) {
+  if (!buffer) return '';
+  const bytes = buffer instanceof Uint8Array
+    ? buffer
+    : buffer instanceof ArrayBuffer
+      ? new Uint8Array(buffer)
+      : ArrayBuffer.isView(buffer)
+        ? new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+        : new Uint8Array(0);
+
+  if (bytes.byteLength === 0) return '';
+
+  const chunkSize = 0x8000; // 32KB chunks to avoid call-stack overflow on large videos
+  const chunks = [];
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const slice = bytes.subarray(i, i + chunkSize);
+    chunks.push(String.fromCharCode.apply(null, slice));
+  }
+  return btoa(chunks.join(''));
+}
+
+/**
+ * Decode an ASCII Base64 string (with optional data URI prefix) back into an ArrayBuffer
+ */
+export function base64AsciiToArrayBuffer(base64String) {
+  if (!base64String || typeof base64String !== 'string') {
+    return new ArrayBuffer(0);
+  }
+  const cleanBase64 = base64String
+    .replace(/^data:[^;]+;base64,/i, '')
+    .replace(/\s+/g, '');
+  if (!cleanBase64) return new ArrayBuffer(0);
+
+  const binaryStr = atob(cleanBase64);
+  const len = binaryStr.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
 export class LocalArchiveBackupProvider extends BackupProvider {
   get id() {
     return 'local_archive';
@@ -95,11 +140,22 @@ export class LocalArchiveBackupProvider extends BackupProvider {
   }
 
   /**
-   * Export lightweight metadata & status snapshot (.json)
+   * Export JSON backup snapshot (.json) including photos & fit videos encoded as ASCII Base64 strings
    */
   async exportMetadataJson() {
     const now = new Date().toISOString();
-    const { garments, settings, outfitHistory, mediaMetadata } = await this._collectDatabaseSnapshot(false);
+    const { garments, settings, outfitHistory, mediaMetadata, mediaRecords } =
+      await this._collectDatabaseSnapshot(true);
+
+    const mediaMap = new Map(mediaRecords.map((m) => [m.id, m]));
+    const mediaWithAscii = mediaMetadata.map((meta) => {
+      const record = mediaMap.get(meta.id);
+      return {
+        ...meta,
+        encoding: 'base64_ascii',
+        dataBase64: record && record.data ? arrayBufferToBase64Ascii(record.data) : ''
+      };
+    });
 
     const payload = {
       version: 1,
@@ -111,7 +167,7 @@ export class LocalArchiveBackupProvider extends BackupProvider {
         lastBackupAt: now
       },
       garments,
-      mediaMetadata,
+      mediaMetadata: mediaWithAscii,
       outfitHistory
     };
 
@@ -120,14 +176,20 @@ export class LocalArchiveBackupProvider extends BackupProvider {
     const filename = `wardrobe-status-${formatDateStamp(now)}.json`;
 
     await wardrobeDb.setSetting('lastBackupAt', now);
-    eventBus.emit('backup:completed', { type: 'json', timestamp: now, count: garments.length });
+    eventBus.emit('backup:completed', {
+      type: 'json',
+      timestamp: now,
+      count: garments.length,
+      mediaCount: mediaWithAscii.length
+    });
 
     return {
       blob,
       jsonString,
       filename,
       timestamp: now,
-      count: garments.length
+      count: garments.length,
+      mediaCount: mediaWithAscii.length
     };
   }
 
@@ -327,21 +389,33 @@ export class LocalArchiveBackupProvider extends BackupProvider {
     mergedSettings.lastBackupAt = now;
     await wardrobeDb.updateSettings(mergedSettings);
 
-    // 2. Restore Media Blobs (if ZIP archive is loaded)
+    // 2. Restore Media Blobs (from ZIP archive entries OR from Base64 ASCII strings in JSON backup)
     let restoredMediaCount = 0;
     const mediaMetadata = Array.isArray(parsedData.mediaMetadata) ? parsedData.mediaMetadata : [];
 
-    if (loadedZip && mediaMetadata.length > 0) {
+    if (mediaMetadata.length > 0) {
       const db = await wardrobeDb.openDb();
       for (let i = 0; i < mediaMetadata.length; i++) {
         const meta = mediaMetadata[i];
-        const ext = getExtensionFromMime(meta.mimeType);
-        const folder = meta.type === 'video' ? 'videos' : 'photos';
-        const candidatePath = meta.archivePath || `${folder}/${meta.id}.${ext}`;
-        const zipEntry = loadedZip.file(candidatePath);
+        if (!meta || !meta.id) continue;
 
-        if (zipEntry) {
-          const arrayBuffer = await zipEntry.async('arraybuffer');
+        let arrayBuffer = null;
+
+        if (loadedZip) {
+          const ext = getExtensionFromMime(meta.mimeType);
+          const folder = meta.type === 'video' ? 'videos' : 'photos';
+          const candidatePath = meta.archivePath || `${folder}/${meta.id}.${ext}`;
+          const zipEntry = loadedZip.file(candidatePath);
+          if (zipEntry) {
+            arrayBuffer = await zipEntry.async('arraybuffer');
+          }
+        }
+
+        if (!arrayBuffer && typeof meta.dataBase64 === 'string' && meta.dataBase64.length > 0) {
+          arrayBuffer = base64AsciiToArrayBuffer(meta.dataBase64);
+        }
+
+        if (arrayBuffer && arrayBuffer.byteLength > 0) {
           await new Promise((resolve, reject) => {
             const tx = db.transaction('media', 'readwrite');
             const store = tx.objectStore('media');
