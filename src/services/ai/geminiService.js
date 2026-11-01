@@ -10,13 +10,51 @@ import { optimizeImageForGemini } from './imageOptimizer.js';
 import { generateOfflineOutfits, inferLayerRole, inferTempSuitability } from './offlineStylist.js';
 
 export const GEMINI_MODEL = 'gemini-2.5-flash';
-export const GEMINI_FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+export const GEMINI_FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
 export const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-async function callGeminiGenerateContent({ apiKey, contents, responseSchema = null, temperature = 0.4 }) {
-  let lastError = null;
+function parseGeminiErrorMessage(errText, fallbackStatusText = '') {
+  if (!errText) return fallbackStatusText || 'Unknown error';
+  try {
+    const parsed = JSON.parse(errText);
+    if (parsed?.error?.message) {
+      return parsed.error.message;
+    }
+  } catch (_) {
+    // Not JSON, fall through
+  }
+  return errText.slice(0, 180);
+}
 
-  for (const modelName of GEMINI_FALLBACK_MODELS) {
+async function discoverAvailableGeminiModel(apiKey) {
+  try {
+    const res = await fetch(`${GEMINI_API_BASE}?key=${encodeURIComponent(apiKey)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const models = (data?.models || []).filter(
+      (m) =>
+        Array.isArray(m.supportedGenerationMethods) &&
+        m.supportedGenerationMethods.includes('generateContent') &&
+        typeof m.name === 'string' &&
+        m.name.includes('gemini') &&
+        !m.name.includes('embedding') &&
+        !m.name.includes('imagen') &&
+        !m.name.includes('tts')
+    );
+    const flashModel = models.find((m) => m.name.includes('flash')) || models[0];
+    return flashModel ? flashModel.name.replace(/^models\//, '') : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function callGeminiGenerateContent({ apiKey, contents, responseSchema = null, temperature = 0.4 }) {
+  let primaryError = null;
+  let lastError = null;
+  const candidateModels = [...GEMINI_FALLBACK_MODELS];
+
+  for (let i = 0; i < candidateModels.length; i++) {
+    const modelName = candidateModels[i];
     const endpoint = `${GEMINI_API_BASE}/${modelName}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const genConfig = {
       temperature,
@@ -42,7 +80,21 @@ async function callGeminiGenerateContent({ apiKey, contents, responseSchema = nu
       }
 
       const errText = await response.text().catch(() => '');
-      lastError = new Error(`Gemini (${modelName}) HTTP ${response.status}: ${errText.slice(0, 140) || response.statusText}`);
+      const cleanMsg = parseGeminiErrorMessage(errText, response.statusText);
+      const currentError = new Error(`Gemini (${modelName}) HTTP ${response.status}: ${cleanMsg}`);
+      lastError = currentError;
+      if (!primaryError && response.status !== 404) {
+        primaryError = currentError;
+      }
+
+      // If API key itself is invalid (Google returns 400 API_KEY_INVALID or 401/403), stop immediately
+      if (
+        response.status === 401 ||
+        response.status === 403 ||
+        /API_KEY_INVALID|API key not valid|expired/i.test(errText)
+      ) {
+        throw currentError;
+      }
 
       // If 400 Bad Request due to responseSchema incompatibility, retry once without responseSchema
       if (response.status === 400 && responseSchema) {
@@ -63,17 +115,24 @@ async function callGeminiGenerateContent({ apiKey, contents, responseSchema = nu
         }
       }
 
-      // If 401/403 invalid API key, don't bother trying other models
-      if (response.status === 401 || response.status === 403) {
-        break;
+      // If all static models returned 404, dynamically query /v1beta/models to find an enabled model
+      if (i === candidateModels.length - 1 && !primaryError) {
+        const discovered = await discoverAvailableGeminiModel(apiKey);
+        if (discovered && !candidateModels.includes(discovered)) {
+          candidateModels.push(discovered);
+        }
       }
-    } catch (networkErr) {
-      lastError = networkErr;
+    } catch (err) {
+      if (/API_KEY_INVALID|API key not valid|HTTP 401|HTTP 403/i.test(err.message)) {
+        throw err;
+      }
+      lastError = err;
+      if (!primaryError) primaryError = err;
       break;
     }
   }
 
-  throw lastError || new Error('Gemini API request failed');
+  throw primaryError || lastError || new Error('Gemini API request failed');
 }
 
 export const AUTO_TAG_SCHEMA = {
