@@ -9,8 +9,13 @@
 import { optimizeImageForGemini } from './imageOptimizer.js';
 import { generateOfflineOutfits, inferLayerRole, inferTempSuitability } from './offlineStylist.js';
 
-export const GEMINI_MODEL = 'gemini-2.5-flash';
-export const GEMINI_FALLBACK_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'];
+export const GEMINI_MODEL = 'gemini-3.8-flash';
+export const GEMINI_FALLBACK_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.5-flash',
+  'gemini-3.0-flash',
+  'gemini-2.5-flash'
+];
 export const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 function parseGeminiErrorMessage(errText, fallbackStatusText = '') {
@@ -26,25 +31,31 @@ function parseGeminiErrorMessage(errText, fallbackStatusText = '') {
   return errText.slice(0, 180);
 }
 
-async function discoverAvailableGeminiModel(apiKey) {
+async function discoverAvailableGeminiModels(apiKey, alreadyTried = new Set()) {
   try {
     const res = await fetch(`${GEMINI_API_BASE}?key=${encodeURIComponent(apiKey)}`);
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const data = await res.json();
-    const models = (data?.models || []).filter(
-      (m) =>
-        Array.isArray(m.supportedGenerationMethods) &&
-        m.supportedGenerationMethods.includes('generateContent') &&
-        typeof m.name === 'string' &&
-        m.name.includes('gemini') &&
-        !m.name.includes('embedding') &&
-        !m.name.includes('imagen') &&
-        !m.name.includes('tts')
-    );
-    const flashModel = models.find((m) => m.name.includes('flash')) || models[0];
-    return flashModel ? flashModel.name.replace(/^models\//, '') : null;
+    const models = (data?.models || [])
+      .filter(
+        (m) =>
+          Array.isArray(m.supportedGenerationMethods) &&
+          m.supportedGenerationMethods.includes('generateContent') &&
+          typeof m.name === 'string' &&
+          m.name.includes('gemini') &&
+          !m.name.includes('embedding') &&
+          !m.name.includes('imagen') &&
+          !m.name.includes('tts')
+      )
+      .map((m) => m.name.replace(/^models\//, ''))
+      .filter((name) => !alreadyTried.has(name))
+      .reverse();
+
+    const flashModels = models.filter((name) => name.includes('flash'));
+    const otherModels = models.filter((name) => !name.includes('flash'));
+    return [...flashModels, ...otherModels].slice(0, 3);
   } catch (_) {
-    return null;
+    return [];
   }
 }
 
@@ -52,9 +63,14 @@ async function callGeminiGenerateContent({ apiKey, contents, responseSchema = nu
   let primaryError = null;
   let lastError = null;
   const candidateModels = [...GEMINI_FALLBACK_MODELS];
+  const triedModels = new Set();
+  let didDiscover = false;
 
   for (let i = 0; i < candidateModels.length; i++) {
     const modelName = candidateModels[i];
+    if (triedModels.has(modelName)) continue;
+    triedModels.add(modelName);
+
     const endpoint = `${GEMINI_API_BASE}/${modelName}:generateContent?key=${encodeURIComponent(apiKey)}`;
     const genConfig = {
       temperature,
@@ -87,6 +103,12 @@ async function callGeminiGenerateContent({ apiKey, contents, responseSchema = nu
         primaryError = currentError;
       }
 
+      // If Google's error message explicitly recommends a model (e.g. "use models/gemini-3.8-flash"), queue it immediately
+      const suggestedMatch = cleanMsg.match(/models\/([a-zA-Z0-9._-]+)/);
+      if (suggestedMatch && suggestedMatch[1] && !triedModels.has(suggestedMatch[1]) && !candidateModels.includes(suggestedMatch[1])) {
+        candidateModels.splice(i + 1, 0, suggestedMatch[1]);
+      }
+
       // If API key itself is invalid (Google returns 400 API_KEY_INVALID or 401/403), stop immediately
       if (
         response.status === 401 ||
@@ -115,11 +137,14 @@ async function callGeminiGenerateContent({ apiKey, contents, responseSchema = nu
         }
       }
 
-      // If all static models returned 404, dynamically query /v1beta/models to find an enabled model
-      if (i === candidateModels.length - 1 && !primaryError) {
-        const discovered = await discoverAvailableGeminiModel(apiKey);
-        if (discovered && !candidateModels.includes(discovered)) {
-          candidateModels.push(discovered);
+      // If static models returned 404, dynamically query /v1beta/models to find untried enabled models
+      if (i === candidateModels.length - 1 && !primaryError && !didDiscover) {
+        didDiscover = true;
+        const discoveredList = await discoverAvailableGeminiModels(apiKey, triedModels);
+        for (const dModel of discoveredList) {
+          if (!candidateModels.includes(dModel)) {
+            candidateModels.push(dModel);
+          }
         }
       }
     } catch (err) {
