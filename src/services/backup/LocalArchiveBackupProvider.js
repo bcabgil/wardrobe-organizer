@@ -82,9 +82,12 @@ export class LocalArchiveBackupProvider extends BackupProvider {
       };
     });
 
+    // Strip sensitive geminiApiKey from exported backup files so keys never leak in shared .zip/.json files
+    const safeSettings = { ...settings, geminiApiKey: '' };
+
     return {
       garments,
-      settings,
+      settings: safeSettings,
       outfitHistory,
       mediaMetadata,
       mediaRecords: includeMediaRecords ? mediaRecords : []
