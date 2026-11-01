@@ -312,4 +312,38 @@ describe('Offline Stylist: Rule-Based Fashion AI Engine', () => {
       expect(outfit.garmentIds).not.toContain('out_w_1'); // No heavy camel coat in hot summer!
     }
   });
+
+  it('T1-STY-08: orders suggested outfits in descending order of wornCount preference', async () => {
+    if (!stylistMod) return;
+
+    const generate = stylistMod.generateOfflineOutfits || stylistMod.default?.generateOfflineOutfits;
+    const buildKey = stylistMod.buildCombinationKey || stylistMod.default?.buildCombinationKey;
+
+    // First generate baseline outfits with 0 wears
+    const baseline = generate({
+      garments: SAMPLE_WARDROBE,
+      occasion: 'everyday',
+      activeSeason: 'winter'
+    });
+    expect(baseline.outfits.length).toBeGreaterThanOrEqual(2);
+
+    // Give the 2nd combination a wornCount of 5 and the 1st combination a wornCount of 1
+    const firstKey = buildKey(baseline.outfits[0].garmentIds);
+    const secondKey = buildKey(baseline.outfits[1].garmentIds);
+    const wearCounts = {
+      [firstKey]: 1,
+      [secondKey]: 5
+    };
+
+    const reordered = generate({
+      garments: SAMPLE_WARDROBE,
+      occasion: 'everyday',
+      activeSeason: 'winter',
+      wearCounts
+    });
+
+    expect(reordered.outfits[0].combinationKey).toBe(secondKey);
+    expect(reordered.outfits[0].wornCount).toBe(5);
+    expect(reordered.outfits[0].wornCount).toBeGreaterThanOrEqual(reordered.outfits[1].wornCount);
+  });
 });

@@ -7,7 +7,57 @@
  */
 
 import { optimizeImageForGemini, extractVideoKeyframes } from './imageOptimizer.js';
-import { generateOfflineOutfits, inferLayerRole, inferTempSuitability } from './offlineStylist.js';
+import {
+  generateOfflineOutfits,
+  inferLayerRole,
+  inferTempSuitability,
+  buildCombinationKey,
+  sortOutfitsByWearPreference
+} from './offlineStylist.js';
+
+const OUTFIT_SUGGESTION_CACHE = new Map();
+
+export function clearOutfitSuggestionCache() {
+  OUTFIT_SUGGESTION_CACHE.clear();
+}
+
+export function computeOutfitCacheKey({
+  garments = [],
+  occasion = 'everyday',
+  activeSeason = 'winter',
+  anchorGarmentId = null,
+  weatherNote = '',
+  weatherData = null,
+  hasApiKey = false
+} = {}) {
+  const cleanInSeasonSig = (garments || [])
+    .filter(
+      (g) =>
+        g &&
+        g.status === 'clean' &&
+        (!g.season || g.season === activeSeason || g.season === 'all-season')
+    )
+    .map(
+      (g) =>
+        `${g.id}:${g.category || ''}:${g.season || ''}:${g.tempSuitability || ''}:${g.layerRole || ''}:${g.type || ''}:${g.colorGroup || ''}:${(g.visualDescription || '').length}`
+    )
+    .sort()
+    .join(',');
+
+  const weatherSig = weatherData
+    ? `${weatherData.condition || ''}:${weatherData.tempMin ?? ''}:${weatherData.tempMax ?? ''}`
+    : 'default-weather';
+
+  return [
+    hasApiKey ? 'gemini' : 'offline',
+    activeSeason,
+    occasion,
+    anchorGarmentId || 'any',
+    String(weatherNote || '').trim().toLowerCase(),
+    weatherSig,
+    cleanInSeasonSig
+  ].join('::');
+}
 
 export const GEMINI_MODEL = 'gemini-3.8-flash';
 export const GEMINI_FALLBACK_MODELS = [
@@ -442,7 +492,10 @@ export async function suggestTomorrowOutfits({
   anchorGarmentId = null,
   weatherNote = '',
   weatherData = null,
-  apiKey = ''
+  apiKey = '',
+  wearCounts = {},
+  forceRefresh = false,
+  persistedCache = null
 } = {}) {
   const trimmedKey = String(apiKey || '').trim();
 
@@ -454,15 +507,54 @@ export async function suggestTomorrowOutfits({
       (!g.season || g.season === activeSeason || g.season === 'all-season')
   );
 
+  const cacheKey = computeOutfitCacheKey({
+    garments,
+    occasion,
+    activeSeason,
+    anchorGarmentId,
+    weatherNote,
+    weatherData,
+    hasApiKey: Boolean(trimmedKey)
+  });
+
+  if (!forceRefresh && cleanInSeason.length >= 2) {
+    const cachedEntry =
+      OUTFIT_SUGGESTION_CACHE.get(cacheKey) ||
+      (persistedCache && typeof persistedCache === 'object' ? persistedCache[cacheKey] : null);
+
+    if (cachedEntry && Array.isArray(cachedEntry.outfits) && cachedEntry.outfits.length > 0) {
+      const sortedCachedOutfits = sortOutfitsByWearPreference(cachedEntry.outfits, wearCounts);
+      OUTFIT_SUGGESTION_CACHE.set(cacheKey, {
+        ...cachedEntry,
+        outfits: sortedCachedOutfits
+      });
+      return {
+        ...cachedEntry,
+        outfits: sortedCachedOutfits,
+        fromCache: true,
+        cacheKey
+      };
+    }
+  }
+
   // If no API key or not enough items, run the deterministic offline stylist immediately
   if (!trimmedKey || cleanInSeason.length < 2) {
-    return generateOfflineOutfits({
+    const offlineResult = generateOfflineOutfits({
       garments,
       occasion,
       activeSeason,
       anchorGarmentId,
-      weatherData
+      weatherData,
+      wearCounts
     });
+    if (offlineResult.outfits && offlineResult.outfits.length > 0) {
+      OUTFIT_SUGGESTION_CACHE.set(cacheKey, offlineResult);
+    }
+    return {
+      ...offlineResult,
+      fromCache: false,
+      cacheKey
+    };
   }
 
   try {
@@ -487,6 +579,25 @@ export async function suggestTomorrowOutfits({
       ? `Tomorrow forecast: ${weatherData.condition || ''}, Min ${weatherData.tempMin}°C / Max ${weatherData.tempMax}°C, Rain chance: ${weatherData.rainProb || 0}%. ${weatherNote || ''}`
       : weatherNote || 'Standard seasonal weather';
 
+    // Summarize favorite previously-worn combinations where all items are currently clean & in-season
+    const validIds = new Set(cleanInSeason.map((g) => g.id));
+    const favoriteCombos = Object.entries(wearCounts || {})
+      .filter(([key, count]) => {
+        if (!count || count <= 0) return false;
+        const ids = key.split('|').filter(Boolean);
+        if (ids.length < 2 || !ids.every((id) => validIds.has(id))) return false;
+        if (anchorItem && !ids.includes(anchorItem.id)) return false;
+        return true;
+      })
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([key, count]) => ({ garmentIds: key.split('|'), wornCount: count }));
+
+    const favoritePreferenceClause =
+      favoriteCombos.length > 0
+        ? `USER FAVORITE COMBINATIONS (Previously Worn & Loved): ${JSON.stringify(favoriteCombos)}. Where appropriate for the occasion and weather, include or prioritize favorite combinations with higher wornCount so the user's preferred outfits appear first.`
+        : '';
+
     const prompt = [
       'You are a personal luxury fashion stylist.',
       `Create 2 to 3 complete, stylish outfit combinations for tomorrow from the user's CLEAN wardrobe inventory below.`,
@@ -497,15 +608,18 @@ export async function suggestTomorrowOutfits({
       '- In winter or cold/chilly weather (< 16°C), do NOT suggest only a single thin top! Combine a base-layer top (layerRole="base", e.g. t-shirt/shirt) AND a mid-layer top (layerRole="mid", e.g. jumper/sweater/cardigan/hoodie) PLUS a bottom and outerwear/shoes when available.',
       '- Match each garment\'s tempSuitability ("freezing", "cold", "mild", "warm", "all-temps") to the forecast temperature.',
       '- Pay close attention to each garment\'s fit, cut, and drape notes in `visualDescription` (captured from the user\'s on-body fit videos when `hasFitVideo` is true). Balance silhouettes across layers (e.g., pair relaxed/oversized jumpers or outer layers with cleaner base layers or structured bottoms, and mention how the fit and proportions work on the body in `explanation` and `layeringTips`).',
+      favoritePreferenceClause,
       anchorItem
         ? `CRITICAL REQUIREMENT: Every single suggested outfit MUST include the anchor garment ID "${anchorItem.id}" (${anchorItem.name}).`
         : 'Combine base/mid tops + bottoms (or one-piece) + optional outerwear/shoes/accessories that harmonize in color and silhouette.',
       'Only use garment IDs that exist in the provided inventory JSON.',
       'Return a JSON object with shape: { "outfits": [ { "title": "...", "garmentIds": ["..."], "explanation": "Detailed fashion stylist explanation of why the colors, fabrics, and on-body fit proportions work together", "layeringTips": "Specific advice on how to layer and style these pieces for the temperature and silhouette" } ] }',
       `Available Clean Inventory JSON:\n${JSON.stringify(inventorySummary, null, 2)}`
-    ].join('\n\n');
+    ]
+      .filter(Boolean)
+      .join('\n\n');
 
-    const { data, modelName } = await callGeminiGenerateContent({
+    const { data } = await callGeminiGenerateContent({
       apiKey: trimmedKey,
       temperature: 0.5,
       responseSchema: OUTFIT_SUGGESTION_SCHEMA,
@@ -519,17 +633,20 @@ export async function suggestTomorrowOutfits({
       throw new Error('Gemini returned empty outfits array');
     }
 
-    const validIds = new Set(cleanInSeason.map((g) => g.id));
     const sanitizedOutfits = parsed.outfits
       .map((o, idx) => {
         const filteredIds = (o.garmentIds || []).filter((id) => validIds.has(id));
         if (anchorItem && !filteredIds.includes(anchorItem.id)) {
           filteredIds.unshift(anchorItem.id);
         }
+        const comboKey = buildCombinationKey(filteredIds);
+        const wornCount = wearCounts && typeof wearCounts[comboKey] === 'number' ? wearCounts[comboKey] : 0;
         return {
           id: `gemini_outfit_${idx + 1}_${Date.now()}`,
           title: o.title || `Curated Look #${idx + 1}`,
           garmentIds: filteredIds,
+          combinationKey: comboKey,
+          wornCount,
           explanation: o.explanation || 'Selected for color harmony and seasonal fit.',
           layeringTips: o.layeringTips || 'Wear with clean proportions.',
           occasion,
@@ -542,11 +659,17 @@ export async function suggestTomorrowOutfits({
       throw new Error('No valid garment IDs in Gemini outfit response');
     }
 
-    return {
+    const sortedOutfits = sortOutfitsByWearPreference(sanitizedOutfits, wearCounts);
+    const geminiResult = {
       engine: 'gemini',
-      outfits: sanitizedOutfits,
-      message: `Styled ${sanitizedOutfits.length} look(s) with Google Gemini AI.`
+      outfits: sortedOutfits,
+      fromCache: false,
+      cacheKey,
+      message: `Styled ${sortedOutfits.length} look(s) with Google Gemini AI.`
     };
+
+    OUTFIT_SUGGESTION_CACHE.set(cacheKey, geminiResult);
+    return geminiResult;
   } catch (err) {
     // Graceful fallback to 100% offline rule-based stylist
     const fallbackResult = generateOfflineOutfits({
@@ -554,10 +677,13 @@ export async function suggestTomorrowOutfits({
       occasion,
       activeSeason,
       anchorGarmentId,
-      weatherData
+      weatherData,
+      wearCounts
     });
     return {
       ...fallbackResult,
+      fromCache: false,
+      cacheKey,
       fallbackReason: err.message
     };
   }
@@ -580,6 +706,8 @@ export default {
   AUTO_TAG_SCHEMA,
   OUTFIT_SUGGESTION_SCHEMA,
   cleanJsonOutput,
+  computeOutfitCacheKey,
+  clearOutfitSuggestionCache,
   analyzeGarmentPhoto,
   suggestTomorrowOutfits,
   testGeminiApiKey

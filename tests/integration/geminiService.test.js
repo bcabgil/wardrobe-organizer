@@ -216,4 +216,92 @@ describe('Gemini AI Integration: Vision Auto-Tagger & Stylist Service', () => {
       window.fetch = origFetch;
     }
   });
+
+  it('T1-GEM-05: caches computed outfit suggestions to avoid duplicate API requests and orders by wornCount desc', async () => {
+    if (!geminiMod) return;
+
+    const suggest = geminiMod.suggestTomorrowOutfits || geminiMod.default?.suggestTomorrowOutfits;
+    const clearCache = geminiMod.clearOutfitSuggestionCache || geminiMod.default?.clearOutfitSuggestionCache;
+    if (clearCache) clearCache();
+
+    const mockGarments = [
+      { id: 'c1', name: 'White Tee', category: 'top', layerRole: 'base', season: 'winter', colorGroup: 'whites', delicate: false, status: 'clean', type: 'everyday' },
+      { id: 'c2', name: 'Grey Jumper', category: 'top', layerRole: 'mid', season: 'winter', colorGroup: 'coloured', delicate: true, status: 'clean', type: 'everyday' },
+      { id: 'c3', name: 'Black Chinos', category: 'bottom', layerRole: 'single', season: 'winter', colorGroup: 'coloured', delicate: false, status: 'clean', type: 'everyday' }
+    ];
+
+    let apiCallCount = 0;
+    const origFetch = window.fetch;
+    window.fetch = async () => {
+      apiCallCount++;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      outfits: [
+                        {
+                          title: 'Look A',
+                          garmentIds: ['c1', 'c3'],
+                          explanation: 'Clean base look.',
+                          layeringTips: 'Simple.'
+                        },
+                        {
+                          title: 'Look B',
+                          garmentIds: ['c1', 'c2', 'c3'],
+                          explanation: 'Layered winter look.',
+                          layeringTips: 'Warm.'
+                        }
+                      ]
+                    })
+                  }
+                ]
+              }
+            }
+          ]
+        })
+      };
+    };
+
+    try {
+      // First call hits Gemini API
+      const firstRes = await suggest({
+        garments: mockGarments,
+        occasion: 'everyday',
+        activeSeason: 'winter',
+        apiKey: 'AIzaSyCacheTestKey',
+        wearCounts: { 'c1|c2|c3': 4, 'c1|c3': 1 }
+      });
+
+      expect(apiCallCount).toBe(1);
+      expect(firstRes.fromCache).toBe(false);
+      // Look B (worn 4 times) must be ordered BEFORE Look A (worn 1 time)
+      expect(firstRes.outfits[0].title).toBe('Look B');
+      expect(firstRes.outfits[0].wornCount).toBe(4);
+      expect(firstRes.outfits[1].title).toBe('Look A');
+      expect(firstRes.outfits[1].wornCount).toBe(1);
+
+      // Second call with identical wardrobe & parameters returns from cache with 0 new API calls!
+      // And if Look A was worn 6 times now, it re-orders Look A first even when served from cache!
+      const secondRes = await suggest({
+        garments: mockGarments,
+        occasion: 'everyday',
+        activeSeason: 'winter',
+        apiKey: 'AIzaSyCacheTestKey',
+        wearCounts: { 'c1|c2|c3': 4, 'c1|c3': 6 }
+      });
+
+      expect(apiCallCount).toBe(1); // Still 1! No duplicate API request sent!
+      expect(secondRes.fromCache).toBe(true);
+      expect(secondRes.outfits[0].title).toBe('Look A');
+      expect(secondRes.outfits[0].wornCount).toBe(6);
+    } finally {
+      window.fetch = origFetch;
+    }
+  });
 });

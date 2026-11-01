@@ -205,16 +205,52 @@ function buildLayeringTip(weatherData, activeSeason, hasMidLayer, hasOuterwear, 
   return `Tuck or cuff the silhouette cleanly to highlight the contrast between your pieces.`;
 }
 
+export function buildCombinationKey(garmentIds = []) {
+  return Array.from(new Set((garmentIds || []).filter(Boolean)))
+    .sort()
+    .join('|');
+}
+
+export function sortOutfitsByWearPreference(outfits = [], wearCounts = {}) {
+  if (!Array.isArray(outfits)) return [];
+  const counts = wearCounts && typeof wearCounts === 'object' ? wearCounts : {};
+  return outfits
+    .map((outfit, originalIndex) => {
+      const key = outfit.combinationKey || buildCombinationKey(outfit.garmentIds || []);
+      const wornCount =
+        typeof counts[key] === 'number'
+          ? counts[key]
+          : typeof outfit.wornCount === 'number'
+            ? outfit.wornCount
+            : 0;
+      return {
+        ...outfit,
+        combinationKey: key,
+        wornCount,
+        _origIdx: originalIndex
+      };
+    })
+    .sort((a, b) => {
+      if (b.wornCount !== a.wornCount) {
+        return b.wornCount - a.wornCount;
+      }
+      return a._origIdx - b._origIdx;
+    })
+    .map(({ _origIdx, ...rest }) => rest);
+}
+
 /**
  * Generate 1-3 rule-based outfits synchronously (100% offline capable)
- * Supports multi-layering (Base Tee/Shirt + Mid Jumper/Sweater + Outer Coat) and temperature suitability.
+ * Supports multi-layering (Base Tee/Shirt + Mid Jumper/Sweater + Outer Coat), temperature suitability,
+ * and user wear-frequency preference ordering.
  */
 export function generateOfflineOutfits({
   garments = [],
   occasion = 'everyday',
   activeSeason = 'winter',
   anchorGarmentId = null,
-  weatherData = null
+  weatherData = null,
+  wearCounts = {}
 } = {}) {
   if (!Array.isArray(garments) || garments.length === 0) {
     return {
@@ -323,16 +359,16 @@ export function generateOfflineOutfits({
 
     if (uniqueItems.length < 2) return;
 
-    const key = uniqueItems
-      .map((g) => g.id)
-      .sort()
-      .join('|');
+    const key = buildCombinationKey(uniqueItems.map((g) => g.id));
     if (candidateCombinations.some((c) => c.key === key)) return;
+
+    const wornCount = wearCounts && typeof wearCounts[key] === 'number' ? wearCounts[key] : 0;
 
     candidateCombinations.push({
       key,
       items: uniqueItems,
-      score: baseScore,
+      wornCount,
+      score: baseScore + wornCount * 25,
       styleLabel
     });
   };
@@ -459,6 +495,8 @@ export function generateOfflineOutfits({
       id: `offline_outfit_${idx + 1}_${Date.now()}`,
       title,
       garmentIds: combo.items.map((g) => g.id),
+      combinationKey: combo.key,
+      wornCount: combo.wornCount || 0,
       explanation,
       layeringTips,
       occasion,
@@ -467,10 +505,12 @@ export function generateOfflineOutfits({
     };
   });
 
+  const sortedOutfits = sortOutfitsByWearPreference(formattedOutfits, wearCounts);
+
   return {
     engine: 'offline',
-    outfits: formattedOutfits,
-    message: `Generated ${formattedOutfits.length} outfit recommendation(s) using the offline stylist.`
+    outfits: sortedOutfits,
+    message: `Generated ${sortedOutfits.length} outfit recommendation(s) using the offline stylist.`
   };
 }
 
@@ -478,5 +518,7 @@ export default {
   inferLayerRole,
   inferTempSuitability,
   isGarmentTempCompatible,
+  buildCombinationKey,
+  sortOutfitsByWearPreference,
   generateOfflineOutfits
 };

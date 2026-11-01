@@ -797,13 +797,24 @@ export class WardrobeDB {
   // ==========================================
 
   /**
+   * Build canonical sorted combination signature from garment IDs
+   */
+  getCombinationKey(garmentIds = []) {
+    return Array.from(new Set((garmentIds || []).filter(Boolean)))
+      .sort()
+      .join('|');
+  }
+
+  /**
    * Save outfit history log (autoIncrement ID)
    */
   async addOutfitHistory(outfit = {}) {
+    const garmentIds = Array.isArray(outfit.garmentIds) ? outfit.garmentIds : [];
     const record = {
       outfitId: outfit.outfitId || outfit.id || generateUUID(),
       title: outfit.title || 'Stylist Outfit',
-      garmentIds: Array.isArray(outfit.garmentIds) ? outfit.garmentIds : [],
+      garmentIds,
+      combinationKey: this.getCombinationKey(garmentIds),
       wornAt: outfit.wornAt || outfit.date || new Date().toISOString(),
       explanation: outfit.explanation || '',
       layeringTips: outfit.layeringTips || '',
@@ -817,6 +828,29 @@ export class WardrobeDB {
     const store = tx.objectStore('outfitHistory');
     const generatedId = await promisifyRequest(store.add(record));
     return { ...record, id: generatedId };
+  }
+
+  /**
+   * Get wear count dictionary mapped by canonical combinationKey (sorted garmentIds joined by '|')
+   * @returns {Promise<Record<string, number>>}
+   */
+  async getCombinationWearCounts() {
+    const db = await this.openDb();
+    const tx = db.transaction('outfitHistory', 'readonly');
+    const store = tx.objectStore('outfitHistory');
+    const records = await promisifyRequest(store.getAll());
+    const counts = {};
+
+    for (const r of records || []) {
+      if (r && r.worn !== false && Array.isArray(r.garmentIds) && r.garmentIds.length > 0) {
+        const key = r.combinationKey || this.getCombinationKey(r.garmentIds);
+        if (key) {
+          counts[key] = (counts[key] || 0) + 1;
+        }
+      }
+    }
+
+    return counts;
   }
 
   /**
@@ -889,5 +923,7 @@ export const addOutfitHistory = wardrobeDb.addOutfitHistory.bind(wardrobeDb);
 export const saveOutfitHistory = wardrobeDb.saveOutfitHistory.bind(wardrobeDb);
 export const getOutfitHistory = wardrobeDb.getOutfitHistory.bind(wardrobeDb);
 export const deleteOutfitHistory = wardrobeDb.deleteOutfitHistory.bind(wardrobeDb);
+export const getCombinationKey = wardrobeDb.getCombinationKey.bind(wardrobeDb);
+export const getCombinationWearCounts = wardrobeDb.getCombinationWearCounts.bind(wardrobeDb);
 
 export default wardrobeDb;

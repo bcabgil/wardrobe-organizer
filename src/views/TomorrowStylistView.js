@@ -110,9 +110,14 @@ export class TomorrowStylistView {
             </label>
           </div>
 
-          <button type="button" id="btn-generate-outfits" class="btn-primary btn-block">
-            ✨ Suggest Outfits for Tomorrow
-          </button>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button type="button" id="btn-generate-outfits" class="btn-primary" style="flex:2;">
+              ✨ Suggest Outfits for Tomorrow
+            </button>
+            <button type="button" id="btn-force-refresh-outfits" class="btn-secondary" style="flex:1;" title="Bypass cache and request fresh combinations from AI">
+              🔄 Refresh Ideas
+            </button>
+          </div>
         </div>
 
         <!-- OUTFIT RESULTS MOUNT -->
@@ -127,7 +132,7 @@ export class TomorrowStylistView {
         this.container
           .querySelectorAll('#stylist-occasion-pills .pill-btn')
           .forEach((b) => b.classList.toggle('active', b === btn));
-        this.generateSuggestions();
+        this.generateSuggestions({ forceRefresh: false });
       });
     });
 
@@ -141,23 +146,31 @@ export class TomorrowStylistView {
     });
 
     this.container.querySelector('#btn-generate-outfits')?.addEventListener('click', () => {
-      this.generateSuggestions();
+      this.generateSuggestions({ forceRefresh: false });
+    });
+
+    this.container.querySelector('#btn-force-refresh-outfits')?.addEventListener('click', () => {
+      this.generateSuggestions({ forceRefresh: true });
     });
   }
 
-  async generateSuggestions() {
+  async generateSuggestions({ forceRefresh = false } = {}) {
     if (!this.container) return;
     const outfitsMount = this.container.querySelector('#stylist-outfits-mount');
     if (!outfitsMount) return;
 
     this.urlManager.revokeAll();
-    LoadingOverlay.show('Curating tomorrow\'s outfit combinations...');
+    LoadingOverlay.show(
+      forceRefresh ? 'Generating fresh AI outfit combinations...' : 'Curating tomorrow\'s outfit combinations...'
+    );
 
     try {
-      // Always fetch latest settings & garments from IndexedDB in case API key or wardrobe just changed
-      const [latestGarments, latestSettings] = await Promise.all([
+      // Always fetch latest settings, garments, wear counts, and persisted cache from IndexedDB
+      const [latestGarments, latestSettings, wearCounts, persistedCache] = await Promise.all([
         wardrobeDb.getAllGarments(),
-        wardrobeDb.getSettings()
+        wardrobeDb.getSettings(),
+        wardrobeDb.getCombinationWearCounts(),
+        wardrobeDb.getSetting('outfitSuggestionsCache', {})
       ]);
       this.garments = latestGarments || [];
       this.settings = latestSettings || {};
@@ -169,8 +182,34 @@ export class TomorrowStylistView {
         anchorGarmentId: this.anchorGarmentId || null,
         weatherNote: this.weatherNote,
         weatherData: this.weather,
-        apiKey: this.settings.geminiApiKey || ''
+        apiKey: this.settings.geminiApiKey || '',
+        wearCounts: wearCounts || {},
+        forceRefresh,
+        persistedCache: persistedCache || {}
       });
+
+      // Persist newly computed outfits in IndexedDB cache (unless it was an API error fallback)
+      if (
+        !result.fromCache &&
+        result.cacheKey &&
+        !result.fallbackReason &&
+        Array.isArray(result.outfits) &&
+        result.outfits.length > 0
+      ) {
+        const nextCache = { ...(persistedCache || {}) };
+        nextCache[result.cacheKey] = {
+          engine: result.engine,
+          outfits: result.outfits,
+          message: result.message,
+          cachedAt: new Date().toISOString()
+        };
+        // Keep max 20 recent cache entries
+        const keys = Object.keys(nextCache);
+        if (keys.length > 20) {
+          delete nextCache[keys[0]];
+        }
+        await wardrobeDb.setSetting('outfitSuggestionsCache', nextCache).catch(() => {});
+      }
 
       this.lastResult = result;
       await this.renderOutfits(result, outfitsMount);
@@ -197,12 +236,13 @@ export class TomorrowStylistView {
     }
 
     const hasApiKey = Boolean(this.settings.geminiApiKey && String(this.settings.geminiApiKey).trim());
+    const cacheTag = result.fromCache ? ' • ⚡ Loaded from Cache (Sorted by Most Worn)' : ' • Sorted by Most Worn';
     const engineBadge =
       result.engine === 'gemini'
-        ? `<span class="engine-badge engine-gemini">✨ Styled by Google Gemini AI</span>`
+        ? `<span class="engine-badge engine-gemini">✨ Styled by Google Gemini AI${escapeHtml(cacheTag)}</span>`
         : hasApiKey && result.fallbackReason
           ? `<span class="engine-badge engine-offline">⚡ Offline Rule Stylist (Gemini Fallback: ${escapeHtml(result.fallbackReason)})</span>`
-          : `<span class="engine-badge engine-offline">⚡ Smart Rule Stylist (Add Gemini Key in Backup/Settings for LLM Styling)</span>`;
+          : `<span class="engine-badge engine-offline">⚡ Smart Rule Stylist${escapeHtml(cacheTag)}</span>`;
 
     const headerBanner = document.createElement('div');
     headerBanner.className = 'stylist-engine-row';
@@ -248,11 +288,19 @@ export class TomorrowStylistView {
       });
 
       const piecesHtml = (await Promise.all(piecesHtmlPromises)).join('');
+      const wornCount = typeof outfit.wornCount === 'number' ? outfit.wornCount : 0;
+      const wornBadgeHtml =
+        wornCount > 0
+          ? `<span class="badge-chip" style="color:var(--accent-gold); border:1px solid rgba(229,195,145,0.45); font-weight:700;">❤️ Worn ${wornCount}×</span>`
+          : `<span class="badge-chip">✨ Unworn Combo</span>`;
 
       cardEl.innerHTML = `
         <div class="outfit-card-header">
           <div>
-            <span class="outfit-kicker">${escapeHtml(this.occasion.toUpperCase())} LOOK</span>
+            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+              <span class="outfit-kicker">${escapeHtml(this.occasion.toUpperCase())} LOOK</span>
+              ${wornBadgeHtml}
+            </div>
             <h3 class="outfit-title">${escapeHtml(outfit.title || 'Curated Combination')}</h3>
           </div>
           <button type="button" class="btn-primary btn-wear-outfit">Wear This Outfit</button>
