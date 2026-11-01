@@ -63,7 +63,7 @@ describe('Offline Stylist: Rule-Based Fashion AI Engine', () => {
     expect(result.engine).toBe('offline');
     expect(Array.isArray(result.outfits)).toBe(true);
     expect(result.outfits.length).toBeGreaterThanOrEqual(1);
-    expect(result.outfits.length).toBeLessThanOrEqual(3);
+    expect(result.outfits.length).toBeLessThanOrEqual(10);
 
     const firstOutfit = result.outfits[0];
     expect(typeof firstOutfit.title).toBe('string');
@@ -393,6 +393,39 @@ describe('Offline Stylist: Rule-Based Fashion AI Engine', () => {
     expect(resWithoutJacket.outfits.length).toBeGreaterThanOrEqual(1);
     for (const outfit of resWithoutJacket.outfits) {
       expect(outfit.garmentIds).not.toContain('out_w_1');
+    }
+  });
+
+  it('T1-STY-10: layers gym outfits as sports bra + sports T-shirt + bottom trousers and supports up to 10 combinations', async () => {
+    if (!stylistMod) return;
+
+    const generate = stylistMod.generateOfflineOutfits || stylistMod.default?.generateOfflineOutfits;
+    const gymWardrobe = [
+      { id: 'bra_1', name: 'Black Sports Bra', category: 'top', season: 'summer', tempSuitability: 'warm', colorGroup: 'coloured', status: 'clean', type: 'gym' },
+      { id: 'bra_2', name: 'Teal Support Sports Bra', category: 'top', season: 'summer', tempSuitability: 'warm', colorGroup: 'coloured', status: 'clean', type: 'gym' },
+      { id: 'tee_1', name: 'White Breathable Sports T-Shirt', category: 'top', season: 'summer', tempSuitability: 'warm', colorGroup: 'whites', status: 'clean', type: 'gym' },
+      { id: 'tee_2', name: 'Grey Mesh Gym Tee', category: 'top', season: 'all-season', colorGroup: 'coloured', status: 'clean', type: 'gym' },
+      { id: 'trou_1', name: 'Black Training Trousers', category: 'bottom', season: 'winter', colorGroup: 'coloured', status: 'clean', type: 'gym' },
+      { id: 'trou_2', name: 'Navy Gym Leggings', category: 'bottom', season: 'all-season', colorGroup: 'coloured', status: 'clean', type: 'gym' }
+    ];
+
+    const res = generate({
+      garments: gymWardrobe,
+      occasion: 'gym',
+      activeSeason: 'winter',
+      includeOuterwear: false
+    });
+
+    // 2 sports bras x 2 sports t-shirts x 2 bottom trousers = 8 combinations (<= 10 cap)
+    expect(res.outfits.length).toBe(8);
+    for (const outfit of res.outfits) {
+      expect(outfit.garmentIds.length).toBe(3);
+      const hasBra = outfit.garmentIds.includes('bra_1') || outfit.garmentIds.includes('bra_2');
+      const hasTee = outfit.garmentIds.includes('tee_1') || outfit.garmentIds.includes('tee_2');
+      const hasTrousers = outfit.garmentIds.includes('trou_1') || outfit.garmentIds.includes('trou_2');
+      expect(hasBra).toBe(true);
+      expect(hasTee).toBe(true);
+      expect(hasTrousers).toBe(true);
     }
   });
 });

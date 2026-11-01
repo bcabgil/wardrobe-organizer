@@ -11,6 +11,11 @@
 
 const NEUTRAL_KEYWORDS = ['white', 'black', 'grey', 'gray', 'navy', 'beige', 'cream', 'camel', 'charcoal', 'khaki', 'denim', 'indigo', 'brown', 'tan', 'ivory'];
 
+export function isSportsBra(garment = {}) {
+  const text = `${garment.name || ''} ${garment.visualDescription || ''}`.toLowerCase();
+  return /bra|bralette|sujetador|crop\s*top|support\s*top|sports\s*top|underlayer|bustier/i.test(text);
+}
+
 export function inferLayerRole(garment = {}) {
   if (garment.layerRole && ['base', 'mid', 'outer', 'single'].includes(garment.layerRole)) {
     return garment.layerRole;
@@ -279,9 +284,11 @@ export function generateOfflineOutfits({
   const forbidOuterwear = includeOuterwear ? layeringEval.forbidOuterwear : true;
 
   // 3. Filter by Occasion Wardrobe (strict independence: everyday, gym, dress-up), Active Season, and Temperature Compatibility
+  // Note: Gym clothes (sports bra, sports T-shirt, gym trousers) are worn year-round for workouts regardless of outdoor season/temp.
   const inSeasonGarments = cleanGarments.filter((g) => {
     const garmentType = g.type || 'everyday';
     if (garmentType !== occasion) return false;
+    if (occasion === 'gym') return true;
     const seasonOk = !g.season || g.season === activeSeason || g.season === 'all-season';
     if (!seasonOk) return false;
     const role = inferLayerRole(g);
@@ -302,6 +309,10 @@ export function generateOfflineOutfits({
   const baseTops = allTops.filter((g) => inferLayerRole(g) === 'base');
   const midTops = allTops.filter((g) => inferLayerRole(g) === 'mid');
 
+  // For Gym: partition tops into Sports Bras (under-layer) and Sports T-shirts/Tops (over-layer)
+  const sportsBras = occasion === 'gym' ? allTops.filter((g) => isSportsBra(g)) : [];
+  const gymTshirts = occasion === 'gym' ? allTops.filter((g) => !isSportsBra(g)) : [];
+
   const bottoms = filterByCategory('bottom');
   const onePieces = filterByCategory('one-piece');
   const outerwearList = includeOuterwear ? filterByCategory('outerwear') : [];
@@ -319,14 +330,18 @@ export function generateOfflineOutfits({
       seenIds.add(anchorItem.id);
     }
 
-    const anchorRole = anchorItem ? inferLayerRole(anchorItem) : null;
-
     for (const it of items) {
       if (!it || seenIds.has(it.id)) continue;
       if (forbidOuterwear && it.category === 'outerwear' && (!anchorItem || anchorItem.id !== it.id)) {
         continue;
       }
-      if (forbidMidLayer && it.category === 'top' && inferLayerRole(it) === 'mid' && (!anchorItem || anchorItem.id !== it.id)) {
+      if (
+        occasion !== 'gym' &&
+        forbidMidLayer &&
+        it.category === 'top' &&
+        inferLayerRole(it) === 'mid' &&
+        (!anchorItem || anchorItem.id !== it.id)
+      ) {
         continue;
       }
 
@@ -339,16 +354,22 @@ export function generateOfflineOutfits({
         continue;
       }
 
-      // For tops: allow 1 'base' top + 1 'mid' top in layered outfits, but never two 'base' tops or two 'mid' tops
+      // For tops:
+      // - In Gym: allow 2 tops (Sports Bra + Sports T-shirt)
+      // - In Everyday/Dress-up: allow 1 'base' top + 1 'mid' top in layered outfits
       if (it.category === 'top') {
-        const itRole = inferLayerRole(it);
-        const alreadyHasSameRoleTop = uniqueItems.some(
-          (u) => u.category === 'top' && inferLayerRole(u) === itRole
-        );
-        if (alreadyHasSameRoleTop) {
-          // Exception: if needMidLayer is true and all tops had the same role, allow a second top only if no mid top exists
-          if (!(needMidLayer && midTops.length === 0 && uniqueItems.filter((u) => u.category === 'top').length < 2)) {
-            continue;
+        const currentTopCount = uniqueItems.filter((u) => u.category === 'top').length;
+        if (currentTopCount >= 2) continue;
+
+        if (occasion !== 'gym') {
+          const itRole = inferLayerRole(it);
+          const alreadyHasSameRoleTop = uniqueItems.some(
+            (u) => u.category === 'top' && inferLayerRole(u) === itRole
+          );
+          if (alreadyHasSameRoleTop) {
+            if (!(needMidLayer && midTops.length === 0 && currentTopCount < 2)) {
+              continue;
+            }
           }
         }
       }
@@ -387,64 +408,130 @@ export function generateOfflineOutfits({
     addCombo(comboItems, score, 'Refined Silhouette');
   }
 
-  // Strategy B: Top(s) + Bottom combinations (with automatic Base + Mid layering in winter/cold weather)
-  const primaryTops =
-    anchorItem && anchorItem.category === 'top'
-      ? [anchorItem]
-      : baseTops.length > 0
-        ? baseTops
-        : allTops;
-
+  // Strategy B: Top(s) + Bottom combinations
   const candidateBottoms = anchorItem && anchorItem.category === 'bottom' ? [anchorItem] : bottoms;
 
-  for (let tIdx = 0; tIdx < primaryTops.length; tIdx++) {
-    const primaryTop = primaryTops[tIdx];
-    const primaryRole = inferLayerRole(primaryTop);
-
-    for (let bIdx = 0; bIdx < candidateBottoms.length; bIdx++) {
-      const bottom = candidateBottoms[bIdx];
-      let score = scorePairHarmony(primaryTop, bottom, occasion, tempBand);
-
-      // Build complimentary second top layer pool (e.g. Base Tee + Mid Jumper in winter/cold)
-      let secondLayerPool = [null];
-      if (needMidLayer && !forbidMidLayer) {
-        if (primaryRole === 'base' && midTops.length > 0) {
-          secondLayerPool = midTops;
-        } else if (primaryRole === 'mid' && baseTops.length > 0) {
-          secondLayerPool = baseTops;
+  if (occasion === 'gym') {
+    // GYM LAYERING: Top (Sports Bra + Sports T-shirt) + Bottom Trousers
+    if (sportsBras.length > 0 && gymTshirts.length > 0 && candidateBottoms.length > 0) {
+      for (let braIdx = 0; braIdx < sportsBras.length; braIdx++) {
+        const bra = sportsBras[braIdx];
+        for (let shirtIdx = 0; shirtIdx < gymTshirts.length; shirtIdx++) {
+          const shirt = gymTshirts[shirtIdx];
+          for (let bIdx = 0; bIdx < candidateBottoms.length; bIdx++) {
+            const bottom = candidateBottoms[bIdx];
+            const score =
+              scorePairHarmony(bra, shirt, occasion, tempBand) +
+              scorePairHarmony(shirt, bottom, occasion, tempBand);
+            const shoe =
+              shoesList.length > 0 ? shoesList[(braIdx + shirtIdx + bIdx) % shoesList.length] : null;
+            const coat =
+              !forbidOuterwear && outerwearList.length > 0
+                ? outerwearList[(braIdx + shirtIdx + bIdx) % outerwearList.length]
+                : null;
+            const acc =
+              accessories.length > 0 && (braIdx + shirtIdx) % 2 === 0 ? accessories[0] : null;
+            addCombo([bra, shirt, bottom, coat, shoe, acc].filter(Boolean), score + 25, 'Active Training Set');
+          }
         }
       }
+    } else if (allTops.length >= 2 && candidateBottoms.length > 0) {
+      // Fallback if 2+ gym tops exist without explicit "bra" keyword: pair 2 gym tops + bottom trousers
+      for (let i = 0; i < allTops.length; i++) {
+        for (let j = i + 1; j < allTops.length; j++) {
+          const topA = allTops[i];
+          const topB = allTops[j];
+          for (let bIdx = 0; bIdx < candidateBottoms.length; bIdx++) {
+            const bottom = candidateBottoms[bIdx];
+            const score =
+              scorePairHarmony(topA, topB, occasion, tempBand) +
+              scorePairHarmony(topB, bottom, occasion, tempBand);
+            const shoe = shoesList.length > 0 ? shoesList[(i + j + bIdx) % shoesList.length] : null;
+            const coat =
+              !forbidOuterwear && outerwearList.length > 0
+                ? outerwearList[(i + j + bIdx) % outerwearList.length]
+                : null;
+            addCombo([topA, topB, bottom, coat, shoe].filter(Boolean), score + 20, 'Active Training Set');
+          }
+        }
+      }
+    } else if (allTops.length >= 1 && candidateBottoms.length > 0) {
+      // Single gym top + bottom trousers
+      for (let tIdx = 0; tIdx < allTops.length; tIdx++) {
+        const top = allTops[tIdx];
+        for (let bIdx = 0; bIdx < candidateBottoms.length; bIdx++) {
+          const bottom = candidateBottoms[bIdx];
+          const score = scorePairHarmony(top, bottom, occasion, tempBand);
+          const shoe = shoesList.length > 0 ? shoesList[(tIdx + bIdx) % shoesList.length] : null;
+          const coat =
+            !forbidOuterwear && outerwearList.length > 0
+              ? outerwearList[(tIdx + bIdx) % outerwearList.length]
+              : null;
+          addCombo([top, bottom, coat, shoe].filter(Boolean), score, 'Active Training Set');
+        }
+      }
+    }
 
-      for (let mIdx = 0; mIdx < secondLayerPool.length; mIdx++) {
-        const secondTopLayer = secondLayerPool[(tIdx + bIdx + mIdx) % secondLayerPool.length];
-        const comboScore = score + (secondTopLayer ? 18 : 0);
+    // If Gym still has 0 combinations but has >= 2 clean gym pieces, build an overall Gym combination
+    if (candidateCombinations.length === 0 && inSeasonGarments.length >= 2) {
+      addCombo(inSeasonGarments.slice(0, 4), 100, 'Complete Gym Kit');
+    }
+  } else {
+    // EVERYDAY & DRESS-UP LAYERING: Base Tee/Shirt + Mid Jumper/Sweater + Bottom
+    const primaryTops =
+      anchorItem && anchorItem.category === 'top'
+        ? [anchorItem]
+        : baseTops.length > 0
+          ? baseTops
+          : allTops;
 
-        const shoe = shoesList.length > 0 ? shoesList[(tIdx + bIdx + mIdx) % shoesList.length] : null;
-        let coat = null;
-        if (!forbidOuterwear && outerwearList.length > 0) {
-          if (needOuterwear || tIdx === 0) {
-            coat = outerwearList[(tIdx + bIdx + mIdx) % outerwearList.length];
+    for (let tIdx = 0; tIdx < primaryTops.length; tIdx++) {
+      const primaryTop = primaryTops[tIdx];
+      const primaryRole = inferLayerRole(primaryTop);
+
+      for (let bIdx = 0; bIdx < candidateBottoms.length; bIdx++) {
+        const bottom = candidateBottoms[bIdx];
+        let score = scorePairHarmony(primaryTop, bottom, occasion, tempBand);
+
+        // Build complimentary second top layer pool (e.g. Base Tee + Mid Jumper in winter/cold)
+        let secondLayerPool = [null];
+        if (needMidLayer && !forbidMidLayer) {
+          if (primaryRole === 'base' && midTops.length > 0) {
+            secondLayerPool = midTops;
+          } else if (primaryRole === 'mid' && baseTops.length > 0) {
+            secondLayerPool = baseTops;
           }
         }
 
-        const acc = accessories.length > 0 && (tIdx + mIdx) % 2 === 0 ? accessories[0] : null;
-        // Order base layer before mid layer
-        const orderedTops =
-          secondTopLayer && primaryRole === 'mid'
-            ? [secondTopLayer, primaryTop]
-            : [primaryTop, secondTopLayer].filter(Boolean);
+        for (let mIdx = 0; mIdx < secondLayerPool.length; mIdx++) {
+          const secondTopLayer = secondLayerPool[(tIdx + bIdx + mIdx) % secondLayerPool.length];
+          const comboScore = score + (secondTopLayer ? 18 : 0);
 
-        const items = [...orderedTops, bottom, coat, shoe, acc].filter(Boolean);
-        const label =
-          occasion === 'gym'
-            ? 'Active Training Set'
-            : occasion === 'dress-up'
+          const shoe = shoesList.length > 0 ? shoesList[(tIdx + bIdx + mIdx) % shoesList.length] : null;
+          let coat = null;
+          if (!forbidOuterwear && outerwearList.length > 0) {
+            if (needOuterwear || tIdx === 0) {
+              coat = outerwearList[(tIdx + bIdx + mIdx) % outerwearList.length];
+            }
+          }
+
+          const acc = accessories.length > 0 && (tIdx + mIdx) % 2 === 0 ? accessories[0] : null;
+          // Order base layer before mid layer
+          const orderedTops =
+            secondTopLayer && primaryRole === 'mid'
+              ? [secondTopLayer, primaryTop]
+              : [primaryTop, secondTopLayer].filter(Boolean);
+
+          const items = [...orderedTops, bottom, coat, shoe, acc].filter(Boolean);
+          const label =
+            occasion === 'dress-up'
               ? 'Elevated Evening Edit'
               : secondTopLayer || coat
                 ? `Layered ${activeSeason.charAt(0).toUpperCase() + activeSeason.slice(1)} Look`
                 : 'Smart Everyday Essentials';
 
-        addCombo(items, comboScore + (coat && needOuterwear ? 15 : 0), label);
+          addCombo(items, comboScore + (coat && needOuterwear ? 15 : 0), label);
+        }
       }
     }
   }
@@ -460,7 +547,7 @@ export function generateOfflineOutfits({
   } else {
     candidateCombinations.sort((a, b) => b.score - a.score);
   }
-  const topOutfits = candidateCombinations.slice(0, 3);
+  const topOutfits = candidateCombinations.slice(0, 10);
 
   if (topOutfits.length === 0) {
     return {
@@ -471,9 +558,42 @@ export function generateOfflineOutfits({
   }
 
   const TITLES_BY_OCCASION = {
-    everyday: ['Effortless Daily Edit', 'Modern Casual Balance', 'Polished Street Layering'],
-    gym: ['High-Output Training Kit', 'Breathable Athletic Flow', 'Dynamic Workout Pair'],
-    'dress-up': ['Tailored Evening Statement', 'Refined Formal Ensemble', 'Sleek Occasion Look']
+    everyday: [
+      'Effortless Daily Edit',
+      'Modern Casual Balance',
+      'Polished Street Layering',
+      'Relaxed Urban Silhouette',
+      'Crisp Everyday Standard',
+      'Weekend Comfort Edit',
+      'Clean Minimalist Pairing',
+      'Smart Off-Duty Combo',
+      'Versatile City Layer',
+      'Classic Wardrobe Staple'
+    ],
+    gym: [
+      'High-Output Training Kit',
+      'Breathable Athletic Flow',
+      'Dynamic Workout Set',
+      'Core Performance Layer',
+      'Endurance Gym Combo',
+      'Active Studio Ensemble',
+      'Cardio & Strength Kit',
+      'Flexible Training Pair',
+      'Lightweight Athletic Edit',
+      'All-Session Gym Outfit'
+    ],
+    'dress-up': [
+      'Tailored Evening Statement',
+      'Refined Formal Ensemble',
+      'Sleek Occasion Look',
+      'Polished Dinner Edit',
+      'Elevated Night Silhouette',
+      'Classic Dress-Up Balance',
+      'Sophisticated Event Pairing',
+      'Sharp Tailored Lineup',
+      'Luxe Occasion Edit',
+      'Modern Formal Harmony'
+    ]
   };
 
   const titles = TITLES_BY_OCCASION[occasion] || TITLES_BY_OCCASION.everyday;

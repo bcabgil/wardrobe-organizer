@@ -37,7 +37,7 @@ export function computeOutfitCacheKey({
         g &&
         g.status === 'clean' &&
         (g.type || 'everyday') === occasion &&
-        (!g.season || g.season === activeSeason || g.season === 'all-season') &&
+        (occasion === 'gym' || !g.season || g.season === activeSeason || g.season === 'all-season') &&
         (includeOuterwear || g.category !== 'outerwear' || g.id === anchorGarmentId)
     )
     .map(
@@ -504,13 +504,14 @@ export async function suggestTomorrowOutfits({
 } = {}) {
   const trimmedKey = String(apiKey || '').trim();
 
-  // Pre-filter candidate pool strictly to the selected occasion wardrobe (everyday, gym, dress-up are independent), clean + in-season garments (excluding outerwear unless includeOuterwear=true or anchored)
+  // Pre-filter candidate pool strictly to the selected occasion wardrobe (everyday, gym, dress-up are independent), clean + in-season garments (excluding outerwear unless includeOuterwear=true or anchored).
+  // Note: Gym garments are worn year-round for workouts regardless of season.
   const cleanInSeason = (garments || []).filter(
     (g) =>
       g &&
       g.status === 'clean' &&
       (g.type || 'everyday') === occasion &&
-      (!g.season || g.season === activeSeason || g.season === 'all-season') &&
+      (occasion === 'gym' || !g.season || g.season === activeSeason || g.season === 'all-season') &&
       (includeOuterwear || g.category !== 'outerwear' || g.id === anchorGarmentId)
   );
 
@@ -616,14 +617,19 @@ export async function suggestTomorrowOutfits({
       ? `REFRESH REQUEST (Seed ${Date.now() % 10000}): Generate fresh, newly shuffled outfit pairings that explore different combinations from the inventory.`
       : '';
 
+    const layeringRuleClause =
+      occasion === 'gym'
+        ? '- GYM LAYERING RULE: For "gym" outfits, the standard layering is Top (Sports Bra + Sports T-shirt) + Bottom Trousers/Leggings (plus gym shoes if available). Always combine both the sports bra and the sports T-shirt together with the bottom trousers when available in the inventory.'
+        : '- In winter or cold/chilly weather (< 16°C), do NOT suggest only a single thin top! Combine a base-layer top (layerRole="base", e.g. t-shirt/shirt) AND a mid-layer top (layerRole="mid", e.g. jumper/sweater/cardigan/hoodie) PLUS a bottom and shoes when available.';
+
     const prompt = [
       'You are a personal luxury fashion stylist.',
-      `Create 2 to 3 complete, stylish outfit combinations for tomorrow from the user's CLEAN wardrobe inventory below.`,
+      `Create up to 10 complete, distinct, stylish outfit combinations (as many unique valid combinations as the inventory supports, up to a maximum of 10) for tomorrow from the user's CLEAN "${occasion}" wardrobe inventory below.`,
       `Target Occasion: "${occasion}"`,
       `Active Season: "${activeSeason}"`,
       `Weather Context: "${weatherContextStr}"`,
       'MULTI-LAYERING, TEMPERATURE SUITABILITY & FIT-VIDEO PROPORTION RULES:',
-      '- In winter or cold/chilly weather (< 16°C), do NOT suggest only a single thin top! Combine a base-layer top (layerRole="base", e.g. t-shirt/shirt) AND a mid-layer top (layerRole="mid", e.g. jumper/sweater/cardigan/hoodie) PLUS a bottom and shoes when available.',
+      layeringRuleClause,
       '- Match each garment\'s tempSuitability ("freezing", "cold", "mild", "warm", "all-temps") to the forecast temperature.',
       outerwearClause,
       '- Pay close attention to each garment\'s fit, cut, and drape notes in `visualDescription` (captured from the user\'s on-body fit videos when `hasFitVideo` is true). Balance silhouettes across layers (e.g., pair relaxed/oversized jumpers with cleaner base layers or structured bottoms, and mention how the fit and proportions work on the body in `explanation` and `layeringTips`).',
@@ -653,6 +659,7 @@ export async function suggestTomorrowOutfits({
       throw new Error('Gemini returned empty outfits array');
     }
 
+    const seenComboKeys = new Set();
     const sanitizedOutfits = parsed.outfits
       .map((o, idx) => {
         const filteredIds = (o.garmentIds || []).filter((id) => validIds.has(id));
@@ -673,13 +680,39 @@ export async function suggestTomorrowOutfits({
           season: activeSeason
         };
       })
-      .filter((o) => o.garmentIds.length >= 1);
+      .filter((o) => {
+        if (o.garmentIds.length < 1 || seenComboKeys.has(o.combinationKey)) return false;
+        seenComboKeys.add(o.combinationKey);
+        return true;
+      })
+      .slice(0, 10);
 
     if (sanitizedOutfits.length === 0) {
       throw new Error('No valid garment IDs in Gemini outfit response');
     }
 
-    const sortedOutfits = sortOutfitsByWearPreference(sanitizedOutfits, wearCounts);
+    // Supplement with any additional unique valid combinations from the rule engine up to 10
+    if (sanitizedOutfits.length < 10) {
+      const offlinePool = generateOfflineOutfits({
+        garments,
+        occasion,
+        activeSeason,
+        anchorGarmentId,
+        weatherData,
+        wearCounts,
+        includeOuterwear,
+        shuffle: Boolean(forceRefresh)
+      });
+      for (const extra of offlinePool.outfits || []) {
+        if (sanitizedOutfits.length >= 10) break;
+        if (!seenComboKeys.has(extra.combinationKey)) {
+          seenComboKeys.add(extra.combinationKey);
+          sanitizedOutfits.push(extra);
+        }
+      }
+    }
+
+    const sortedOutfits = sortOutfitsByWearPreference(sanitizedOutfits, wearCounts).slice(0, 10);
     const geminiResult = {
       engine: 'gemini',
       outfits: sortedOutfits,

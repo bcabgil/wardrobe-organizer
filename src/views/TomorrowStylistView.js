@@ -73,7 +73,7 @@ export class TomorrowStylistView {
         g &&
         g.status === 'clean' &&
         (g.type || 'everyday') === targetOccasion &&
-        (!g.season || g.season === activeSeason || g.season === 'all-season')
+        (targetOccasion === 'gym' || !g.season || g.season === activeSeason || g.season === 'all-season')
     );
   }
 
