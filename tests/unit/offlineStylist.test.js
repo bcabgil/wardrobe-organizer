@@ -346,4 +346,29 @@ describe('Offline Stylist: Rule-Based Fashion AI Engine', () => {
     expect(reordered.outfits[0].wornCount).toBe(5);
     expect(reordered.outfits[0].wornCount).toBeGreaterThanOrEqual(reordered.outfits[1].wornCount);
   });
+
+  it('T1-STY-09: omits jacket/outerwear when includeOuterwear is false (default in Tomorrow Stylist)', async () => {
+    if (!stylistMod) return;
+
+    const generate = stylistMod.generateOfflineOutfits || stylistMod.default?.generateOfflineOutfits;
+    const coldWeather = {
+      tempMin: 2,
+      tempMax: 8,
+      rainProb: 70,
+      condition: 'Cold and rainy'
+    };
+
+    const resWithoutJacket = generate({
+      garments: SAMPLE_WARDROBE,
+      occasion: 'everyday',
+      activeSeason: 'winter',
+      weatherData: coldWeather,
+      includeOuterwear: false
+    });
+
+    expect(resWithoutJacket.outfits.length).toBeGreaterThanOrEqual(1);
+    for (const outfit of resWithoutJacket.outfits) {
+      expect(outfit.garmentIds).not.toContain('out_w_1');
+    }
+  });
 });

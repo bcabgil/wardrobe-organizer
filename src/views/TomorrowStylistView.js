@@ -24,6 +24,7 @@ export class TomorrowStylistView {
     this.occasion = 'everyday';
     this.anchorGarmentId = '';
     this.weatherNote = '';
+    this.includeOuterwear = false;
     this.lastResult = null;
   }
 
@@ -110,6 +111,11 @@ export class TomorrowStylistView {
             </label>
           </div>
 
+          <label class="form-label" style="flex-direction:row; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" id="stylist-include-outerwear" ${this.includeOuterwear ? 'checked' : ''} style="width:17px; height:17px; accent-color:var(--accent-gold); cursor:pointer;" />
+            <span>🧥 Include Jacket / Outerwear in Suggestions <em style="color:var(--text-muted); font-weight:400;">(Optional — off by default)</em></span>
+          </label>
+
           <div style="display:flex; gap:10px; flex-wrap:wrap;">
             <button type="button" id="btn-generate-outfits" class="btn-primary" style="flex:2;">
               ✨ Suggest Outfits for Tomorrow
@@ -136,13 +142,18 @@ export class TomorrowStylistView {
       });
     });
 
-    // Bind anchor select & note
+    // Bind anchor select, note & optional outerwear toggle
     this.container.querySelector('#stylist-anchor-select')?.addEventListener('change', (e) => {
       this.anchorGarmentId = e.target.value || '';
     });
 
     this.container.querySelector('#stylist-note-input')?.addEventListener('input', (e) => {
       this.weatherNote = e.target.value || '';
+    });
+
+    this.container.querySelector('#stylist-include-outerwear')?.addEventListener('change', (e) => {
+      this.includeOuterwear = Boolean(e.target.checked);
+      this.generateSuggestions({ forceRefresh: false });
     });
 
     this.container.querySelector('#btn-generate-outfits')?.addEventListener('click', () => {
@@ -185,7 +196,8 @@ export class TomorrowStylistView {
         apiKey: this.settings.geminiApiKey || '',
         wearCounts: wearCounts || {},
         forceRefresh,
-        persistedCache: persistedCache || {}
+        persistedCache: persistedCache || {},
+        includeOuterwear: this.includeOuterwear
       });
 
       // Persist newly computed outfits in IndexedDB cache (unless it was an API error fallback)

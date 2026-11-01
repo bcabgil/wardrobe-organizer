@@ -250,7 +250,8 @@ export function generateOfflineOutfits({
   activeSeason = 'winter',
   anchorGarmentId = null,
   weatherData = null,
-  wearCounts = {}
+  wearCounts = {},
+  includeOuterwear = true
 } = {}) {
   if (!Array.isArray(garments) || garments.length === 0) {
     return {
@@ -271,8 +272,10 @@ export function generateOfflineOutfits({
   }
 
   // 2. Evaluate weather & layering needs
-  const { tempBand, needMidLayer, needOuterwear, forbidOuterwear, forbidMidLayer } =
-    evaluateLayeringNeeds(weatherData, activeSeason);
+  const layeringEval = evaluateLayeringNeeds(weatherData, activeSeason);
+  const { tempBand, needMidLayer, forbidMidLayer } = layeringEval;
+  const needOuterwear = includeOuterwear ? layeringEval.needOuterwear : false;
+  const forbidOuterwear = includeOuterwear ? layeringEval.forbidOuterwear : true;
 
   // 3. Filter by Active Season (activeSeason + 'all-season') and Temperature Compatibility
   const inSeasonGarments = cleanGarments.filter((g) => {
@@ -304,7 +307,7 @@ export function generateOfflineOutfits({
   const onePieces = inSeasonGarments.filter(
     (g) => g.category === 'one-piece' && (g.type === occasion || occasion === 'dress-up')
   );
-  const outerwearList = filterByCategory('outerwear', false);
+  const outerwearList = includeOuterwear ? filterByCategory('outerwear', false) : [];
   const shoesList = filterByCategory('shoes', true);
   const accessories = filterByCategory('accessory', false);
 

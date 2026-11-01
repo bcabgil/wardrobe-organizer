@@ -28,14 +28,16 @@ export function computeOutfitCacheKey({
   anchorGarmentId = null,
   weatherNote = '',
   weatherData = null,
-  hasApiKey = false
+  hasApiKey = false,
+  includeOuterwear = false
 } = {}) {
   const cleanInSeasonSig = (garments || [])
     .filter(
       (g) =>
         g &&
         g.status === 'clean' &&
-        (!g.season || g.season === activeSeason || g.season === 'all-season')
+        (!g.season || g.season === activeSeason || g.season === 'all-season') &&
+        (includeOuterwear || g.category !== 'outerwear' || g.id === anchorGarmentId)
     )
     .map(
       (g) =>
@@ -53,6 +55,7 @@ export function computeOutfitCacheKey({
     activeSeason,
     occasion,
     anchorGarmentId || 'any',
+    includeOuterwear ? 'with-outerwear' : 'no-outerwear',
     String(weatherNote || '').trim().toLowerCase(),
     weatherSig,
     cleanInSeasonSig
@@ -495,16 +498,18 @@ export async function suggestTomorrowOutfits({
   apiKey = '',
   wearCounts = {},
   forceRefresh = false,
-  persistedCache = null
+  persistedCache = null,
+  includeOuterwear = false
 } = {}) {
   const trimmedKey = String(apiKey || '').trim();
 
-  // Pre-filter candidate pool to clean + in-season garments
+  // Pre-filter candidate pool to clean + in-season garments (excluding outerwear unless includeOuterwear=true or anchored)
   const cleanInSeason = (garments || []).filter(
     (g) =>
       g &&
       g.status === 'clean' &&
-      (!g.season || g.season === activeSeason || g.season === 'all-season')
+      (!g.season || g.season === activeSeason || g.season === 'all-season') &&
+      (includeOuterwear || g.category !== 'outerwear' || g.id === anchorGarmentId)
   );
 
   const cacheKey = computeOutfitCacheKey({
@@ -514,7 +519,8 @@ export async function suggestTomorrowOutfits({
     anchorGarmentId,
     weatherNote,
     weatherData,
-    hasApiKey: Boolean(trimmedKey)
+    hasApiKey: Boolean(trimmedKey),
+    includeOuterwear
   });
 
   if (!forceRefresh && cleanInSeason.length >= 2) {
@@ -545,7 +551,8 @@ export async function suggestTomorrowOutfits({
       activeSeason,
       anchorGarmentId,
       weatherData,
-      wearCounts
+      wearCounts,
+      includeOuterwear
     });
     if (offlineResult.outfits && offlineResult.outfits.length > 0) {
       OUTFIT_SUGGESTION_CACHE.set(cacheKey, offlineResult);
@@ -598,6 +605,10 @@ export async function suggestTomorrowOutfits({
         ? `USER FAVORITE COMBINATIONS (Previously Worn & Loved): ${JSON.stringify(favoriteCombos)}. Where appropriate for the occasion and weather, include or prioritize favorite combinations with higher wornCount so the user's preferred outfits appear first.`
         : '';
 
+    const outerwearClause = includeOuterwear
+      ? '- Include outerwear/jackets when appropriate for the temperature or rain.'
+      : '- Do NOT include jackets or coats (category="outerwear"), as the user uses their standard seasonal jacket separately. Focus on base + mid-layer tops, bottoms, one-pieces, shoes, and accessories.';
+
     const prompt = [
       'You are a personal luxury fashion stylist.',
       `Create 2 to 3 complete, stylish outfit combinations for tomorrow from the user's CLEAN wardrobe inventory below.`,
@@ -605,13 +616,14 @@ export async function suggestTomorrowOutfits({
       `Active Season: "${activeSeason}"`,
       `Weather Context: "${weatherContextStr}"`,
       'MULTI-LAYERING, TEMPERATURE SUITABILITY & FIT-VIDEO PROPORTION RULES:',
-      '- In winter or cold/chilly weather (< 16°C), do NOT suggest only a single thin top! Combine a base-layer top (layerRole="base", e.g. t-shirt/shirt) AND a mid-layer top (layerRole="mid", e.g. jumper/sweater/cardigan/hoodie) PLUS a bottom and outerwear/shoes when available.',
+      '- In winter or cold/chilly weather (< 16°C), do NOT suggest only a single thin top! Combine a base-layer top (layerRole="base", e.g. t-shirt/shirt) AND a mid-layer top (layerRole="mid", e.g. jumper/sweater/cardigan/hoodie) PLUS a bottom and shoes when available.',
       '- Match each garment\'s tempSuitability ("freezing", "cold", "mild", "warm", "all-temps") to the forecast temperature.',
-      '- Pay close attention to each garment\'s fit, cut, and drape notes in `visualDescription` (captured from the user\'s on-body fit videos when `hasFitVideo` is true). Balance silhouettes across layers (e.g., pair relaxed/oversized jumpers or outer layers with cleaner base layers or structured bottoms, and mention how the fit and proportions work on the body in `explanation` and `layeringTips`).',
+      outerwearClause,
+      '- Pay close attention to each garment\'s fit, cut, and drape notes in `visualDescription` (captured from the user\'s on-body fit videos when `hasFitVideo` is true). Balance silhouettes across layers (e.g., pair relaxed/oversized jumpers with cleaner base layers or structured bottoms, and mention how the fit and proportions work on the body in `explanation` and `layeringTips`).',
       favoritePreferenceClause,
       anchorItem
         ? `CRITICAL REQUIREMENT: Every single suggested outfit MUST include the anchor garment ID "${anchorItem.id}" (${anchorItem.name}).`
-        : 'Combine base/mid tops + bottoms (or one-piece) + optional outerwear/shoes/accessories that harmonize in color and silhouette.',
+        : 'Combine base/mid tops + bottoms (or one-piece) + optional shoes/accessories that harmonize in color and silhouette.',
       'Only use garment IDs that exist in the provided inventory JSON.',
       'Return a JSON object with shape: { "outfits": [ { "title": "...", "garmentIds": ["..."], "explanation": "Detailed fashion stylist explanation of why the colors, fabrics, and on-body fit proportions work together", "layeringTips": "Specific advice on how to layer and style these pieces for the temperature and silhouette" } ] }',
       `Available Clean Inventory JSON:\n${JSON.stringify(inventorySummary, null, 2)}`
@@ -678,7 +690,8 @@ export async function suggestTomorrowOutfits({
       activeSeason,
       anchorGarmentId,
       weatherData,
-      wearCounts
+      wearCounts,
+      includeOuterwear
     });
     return {
       ...fallbackResult,
