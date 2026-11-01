@@ -254,6 +254,24 @@ export class BackupSettingsView {
       this.render();
     });
 
+    // Auto-save Gemini API Key immediately on paste/change so switching tabs never loses it
+    const keyInputEl = this.container.querySelector('#gemini-key-input');
+    keyInputEl?.addEventListener('change', async () => {
+      const val = String(keyInputEl.value || '').trim();
+      await wardrobeDb.setSetting('geminiApiKey', val);
+      this.settings.geminiApiKey = val;
+    });
+    keyInputEl?.addEventListener('paste', (e) => {
+      setTimeout(async () => {
+        const val = String(keyInputEl.value || '').trim();
+        if (val) {
+          await wardrobeDb.setSetting('geminiApiKey', val);
+          this.settings.geminiApiKey = val;
+          showToast('API key saved automatically! Click "🔌 Test Key" to verify.', 'info');
+        }
+      }, 50);
+    });
+
     // Test Gemini API Key button
     this.container.querySelector('#btn-test-gemini-key')?.addEventListener('click', async () => {
       const keyInput = this.container.querySelector('#gemini-key-input');
