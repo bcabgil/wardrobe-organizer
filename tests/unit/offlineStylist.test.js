@@ -428,4 +428,43 @@ describe('Offline Stylist: Rule-Based Fashion AI Engine', () => {
       expect(hasTrousers).toBe(true);
     }
   });
+
+  it('T1-STY-11: supports multi-select tempSuitability arrays on garments across multiple temperature bands', async () => {
+    if (!stylistMod) return;
+
+    const generate = stylistMod.generateOfflineOutfits || stylistMod.default?.generateOfflineOutfits;
+    const isCompatible = stylistMod.isGarmentTempCompatible || stylistMod.default?.isGarmentTempCompatible;
+
+    const multiTempJumper = {
+      id: 'multi_jumper',
+      name: 'Cotton-Merino Jumper',
+      category: 'top',
+      layerRole: 'mid',
+      season: 'all-season',
+      tempSuitability: ['cold', 'mild'],
+      colorGroup: 'coloured',
+      status: 'clean',
+      type: 'everyday'
+    };
+
+    expect(isCompatible(multiTempJumper, 'cold')).toBe(true);
+    expect(isCompatible(multiTempJumper, 'mild')).toBe(true);
+    expect(isCompatible(multiTempJumper, 'warm')).toBe(false);
+
+    const wardrobe = [
+      multiTempJumper,
+      { id: 'base_1', name: 'White Tee', category: 'top', layerRole: 'base', season: 'all-season', tempSuitability: ['cold', 'mild', 'warm'], colorGroup: 'whites', status: 'clean', type: 'everyday' },
+      { id: 'bot_1', name: 'Blue Jeans', category: 'bottom', layerRole: 'single', season: 'all-season', tempSuitability: ['freezing', 'cold', 'mild'], colorGroup: 'coloured', status: 'clean', type: 'everyday' }
+    ];
+
+    const coldRes = generate({
+      garments: wardrobe,
+      occasion: 'everyday',
+      activeSeason: 'winter',
+      weatherData: { tempMin: 7, tempMax: 11, rainProb: 0, condition: 'Chilly' }
+    });
+
+    expect(coldRes.outfits.length).toBeGreaterThanOrEqual(1);
+    expect(coldRes.outfits[0].garmentIds).toContain('multi_jumper');
+  });
 });

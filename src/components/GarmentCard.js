@@ -30,9 +30,15 @@ export class GarmentCard {
       warm: '☀️ >22°C',
       'all-temps': '🌡️ All Temps'
     };
-    const tempBadge = g.tempSuitability && tempLabels[g.tempSuitability]
-      ? `<span class="badge-chip">${tempLabels[g.tempSuitability]}</span>`
-      : '';
+    const tempList = Array.isArray(g.tempSuitability)
+      ? g.tempSuitability
+      : typeof g.tempSuitability === 'string' && g.tempSuitability
+        ? g.tempSuitability.split(',').map((s) => s.trim())
+        : [];
+    const tempBadge = tempList
+      .filter((t) => tempLabels[t])
+      .map((t) => `<span class="badge-chip">${tempLabels[t]}</span>`)
+      .join('');
     const layerBadge = g.category === 'top' && g.layerRole === 'mid'
       ? `<span class="badge-chip">🧶 Mid Layer</span>`
       : g.category === 'top' && g.layerRole === 'base'

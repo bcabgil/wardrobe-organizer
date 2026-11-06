@@ -11,6 +11,7 @@ import {
   generateOfflineOutfits,
   inferLayerRole,
   inferTempSuitability,
+  inferTempSuitabilityList,
   buildCombinationKey,
   sortOutfitsByWearPreference
 } from './offlineStylist.js';
@@ -42,7 +43,7 @@ export function computeOutfitCacheKey({
     )
     .map(
       (g) =>
-        `${g.id}:${g.category || ''}:${g.season || ''}:${g.tempSuitability || ''}:${g.layerRole || ''}:${g.type || 'everyday'}:${g.colorGroup || ''}:${(g.visualDescription || '').length}`
+        `${g.id}:${g.category || ''}:${g.season || ''}:${Array.isArray(g.tempSuitability) ? g.tempSuitability.join('|') : g.tempSuitability || ''}:${g.layerRole || ''}:${g.type || 'everyday'}:${g.colorGroup || ''}:${(g.visualDescription || '').length}`
     )
     .sort()
     .join(',');
@@ -574,7 +575,7 @@ export async function suggestTomorrowOutfits({
       name: g.name,
       category: g.category,
       season: g.season,
-      tempSuitability: inferTempSuitability(g),
+      tempSuitability: inferTempSuitabilityList(g),
       layerRole: inferLayerRole(g),
       colorGroup: g.colorGroup,
       type: g.type,

@@ -19,7 +19,7 @@ export class AddGarmentView {
       name: '',
       category: 'top',
       season: 'winter',
-      tempSuitability: 'cold',
+      tempSuitability: ['cold'],
       layerRole: 'base',
       colorGroup: 'coloured',
       delicate: false,
@@ -34,9 +34,15 @@ export class AddGarmentView {
     const settings = await wardrobeDb.getSettings();
     if (settings && settings.activeSeason) {
       this.formState.season = settings.activeSeason;
-      this.formState.tempSuitability = settings.activeSeason === 'winter' ? 'cold' : 'warm';
+      this.formState.tempSuitability = [settings.activeSeason === 'winter' ? 'cold' : 'warm'];
     }
     this.render();
+  }
+
+  isTempSelected(val) {
+    const cur = this.formState.tempSuitability;
+    if (Array.isArray(cur)) return cur.includes(val);
+    return cur === val;
   }
 
   render() {
@@ -117,13 +123,13 @@ export class AddGarmentView {
           </div>
 
           <div class="form-group">
-            <span class="form-label">Temperature Suitability</span>
-            <div class="pill-selector" data-field="tempSuitability">
-              <button type="button" class="pill-btn ${this.formState.tempSuitability === 'freezing' ? 'active' : ''}" data-val="freezing">🧊 Freezing (&lt;5°C)</button>
-              <button type="button" class="pill-btn ${this.formState.tempSuitability === 'cold' ? 'active' : ''}" data-val="cold">❄️ Cold (5–14°C)</button>
-              <button type="button" class="pill-btn ${this.formState.tempSuitability === 'mild' ? 'active' : ''}" data-val="mild">🌤️ Mild (15–22°C)</button>
-              <button type="button" class="pill-btn ${this.formState.tempSuitability === 'warm' ? 'active' : ''}" data-val="warm">☀️ Warm (&gt;22°C)</button>
-              <button type="button" class="pill-btn ${this.formState.tempSuitability === 'all-temps' ? 'active' : ''}" data-val="all-temps">🌡️ All Temps</button>
+            <span class="form-label">Temperature Suitability <em style="color:var(--text-muted); font-weight:400;">(Select one or more)</em></span>
+            <div class="pill-selector" data-field="tempSuitability" data-multi="true">
+              <button type="button" class="pill-btn ${this.isTempSelected('freezing') ? 'active' : ''}" data-val="freezing">🧊 Freezing (&lt;5°C)</button>
+              <button type="button" class="pill-btn ${this.isTempSelected('cold') ? 'active' : ''}" data-val="cold">❄️ Cold (5–14°C)</button>
+              <button type="button" class="pill-btn ${this.isTempSelected('mild') ? 'active' : ''}" data-val="mild">🌤️ Mild (15–22°C)</button>
+              <button type="button" class="pill-btn ${this.isTempSelected('warm') ? 'active' : ''}" data-val="warm">☀️ Warm (&gt;22°C)</button>
+              <button type="button" class="pill-btn ${this.isTempSelected('all-temps') ? 'active' : ''}" data-val="all-temps">🌡️ All Temps</button>
             </div>
           </div>
 
@@ -182,14 +188,42 @@ export class AddGarmentView {
   bindEvents() {
     if (!this.container) return;
 
-    // Pill selectors
+    // Pill selectors (with multi-select support for tempSuitability)
     this.container.querySelectorAll('.pill-selector').forEach((groupEl) => {
       const field = groupEl.dataset.field;
+      const isMulti = groupEl.dataset.multi === 'true' || field === 'tempSuitability';
       groupEl.querySelectorAll('.pill-btn').forEach((btn) => {
         btn.addEventListener('click', () => {
           const rawVal = btn.dataset.val;
-          this.formState[field] = field === 'delicate' ? rawVal === 'true' : rawVal;
-          groupEl.querySelectorAll('.pill-btn').forEach((b) => b.classList.toggle('active', b === btn));
+          if (isMulti) {
+            let current = Array.isArray(this.formState[field])
+              ? [...this.formState[field]]
+              : this.formState[field]
+                ? [this.formState[field]]
+                : [];
+
+            if (rawVal === 'all-temps') {
+              current = ['all-temps'];
+            } else {
+              current = current.filter((v) => v !== 'all-temps');
+              if (current.includes(rawVal)) {
+                current = current.filter((v) => v !== rawVal);
+              } else {
+                current.push(rawVal);
+              }
+              if (current.length === 0) {
+                current = ['all-temps'];
+              }
+            }
+
+            this.formState[field] = current;
+            groupEl.querySelectorAll('.pill-btn').forEach((b) => {
+              b.classList.toggle('active', current.includes(b.dataset.val));
+            });
+          } else {
+            this.formState[field] = field === 'delicate' ? rawVal === 'true' : rawVal;
+            groupEl.querySelectorAll('.pill-btn').forEach((b) => b.classList.toggle('active', b === btn));
+          }
         });
       });
     });
@@ -264,12 +298,25 @@ export class AddGarmentView {
 
         ['category', 'season', 'tempSuitability', 'layerRole', 'colorGroup', 'delicate', 'type'].forEach((field) => {
           if (tagResult[field] !== undefined) {
-            this.formState[field] = tagResult[field];
-            const groupEl = this.container.querySelector(`.pill-selector[data-field="${field}"]`);
-            if (groupEl) {
-              groupEl.querySelectorAll('.pill-btn').forEach((btn) => {
-                btn.classList.toggle('active', btn.dataset.val === String(tagResult[field]));
-              });
+            if (field === 'tempSuitability') {
+              const nextArr = Array.isArray(tagResult[field])
+                ? tagResult[field]
+                : [String(tagResult[field])];
+              this.formState.tempSuitability = nextArr;
+              const groupEl = this.container.querySelector(`.pill-selector[data-field="tempSuitability"]`);
+              if (groupEl) {
+                groupEl.querySelectorAll('.pill-btn').forEach((btn) => {
+                  btn.classList.toggle('active', nextArr.includes(btn.dataset.val));
+                });
+              }
+            } else {
+              this.formState[field] = tagResult[field];
+              const groupEl = this.container.querySelector(`.pill-selector[data-field="${field}"]`);
+              if (groupEl) {
+                groupEl.querySelectorAll('.pill-btn').forEach((btn) => {
+                  btn.classList.toggle('active', btn.dataset.val === String(tagResult[field]));
+                });
+              }
             }
           }
         });

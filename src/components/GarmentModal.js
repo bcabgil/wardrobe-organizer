@@ -54,6 +54,13 @@ export class GarmentModal {
     wrapper.dataset.modal = 'garment-detail';
 
     const isClean = g.status !== 'to_wash';
+    const currentTemps = Array.isArray(g.tempSuitability)
+      ? [...g.tempSuitability]
+      : typeof g.tempSuitability === 'string' && g.tempSuitability
+        ? g.tempSuitability.split(',').map((s) => s.trim())
+        : ['all-temps'];
+    this.editTempSuitability = currentTemps.length > 0 ? currentTemps : ['all-temps'];
+    const tempDisplayLabel = this.editTempSuitability.join(', ');
 
     wrapper.innerHTML = `
       <div class="modal-sheet">
@@ -82,7 +89,7 @@ export class GarmentModal {
               <div class="attr-pill"><span>Season</span><strong>${escapeHtml(g.season || 'all-season')}</strong></div>
               <div class="attr-pill"><span>Category</span><strong>${escapeHtml(g.category || 'top')}</strong></div>
               <div class="attr-pill"><span>Layer Role</span><strong>${escapeHtml(g.layerRole || 'base')}</strong></div>
-              <div class="attr-pill"><span>Temp Range</span><strong>${escapeHtml(g.tempSuitability || 'all-temps')}</strong></div>
+              <div class="attr-pill"><span>Temp Range</span><strong>${escapeHtml(tempDisplayLabel)}</strong></div>
               <div class="attr-pill"><span>Occasion</span><strong>${escapeHtml(g.type || 'everyday')}</strong></div>
               <div class="attr-pill"><span>Color Group</span><strong>${escapeHtml(g.colorGroup || 'coloured')}</strong></div>
               <div class="attr-pill"><span>Delicate</span><strong>${g.delicate ? 'Yes (Delicate)' : 'No (Regular)'}</strong></div>
@@ -140,15 +147,15 @@ export class GarmentModal {
                     <option value="single" ${g.layerRole === 'single' ? 'selected' : ''}>✨ Single / Bottom / Shoes</option>
                   </select>
                 </label>
-                <label class="form-label">Temperature Suitability
-                  <select name="tempSuitability" class="form-select">
-                    <option value="freezing" ${g.tempSuitability === 'freezing' ? 'selected' : ''}>🧊 Freezing (&lt;5°C)</option>
-                    <option value="cold" ${g.tempSuitability === 'cold' ? 'selected' : ''}>❄️ Cold (5–14°C)</option>
-                    <option value="mild" ${g.tempSuitability === 'mild' ? 'selected' : ''}>🌤️ Mild (15–22°C)</option>
-                    <option value="warm" ${g.tempSuitability === 'warm' ? 'selected' : ''}>☀️ Warm (&gt;22°C)</option>
-                    <option value="all-temps" ${(!g.tempSuitability || g.tempSuitability === 'all-temps') ? 'selected' : ''}>🌡️ All Temps</option>
-                  </select>
-                </label>
+              </div>
+              <div class="form-label">Temperature Suitability <span class="text-muted">(Multi-select)</span>
+                <div class="pill-selector" data-field="editTempSuitability" data-multi="true">
+                  <button type="button" class="pill-btn ${this.editTempSuitability.includes('freezing') ? 'active' : ''}" data-value="freezing">🧊 Freezing (&lt;5°C)</button>
+                  <button type="button" class="pill-btn ${this.editTempSuitability.includes('cold') ? 'active' : ''}" data-value="cold">❄️ Cold (5–14°C)</button>
+                  <button type="button" class="pill-btn ${this.editTempSuitability.includes('mild') ? 'active' : ''}" data-value="mild">🌤️ Mild (15–22°C)</button>
+                  <button type="button" class="pill-btn ${this.editTempSuitability.includes('warm') ? 'active' : ''}" data-value="warm">☀️ Warm (&gt;22°C)</button>
+                  <button type="button" class="pill-btn ${this.editTempSuitability.includes('all-temps') ? 'active' : ''}" data-value="all-temps">🌡️ All Temps</button>
+                </div>
               </div>
               <div class="form-row-2">
                 <label class="form-label">Color Group
@@ -279,10 +286,21 @@ export class GarmentModal {
           if (tagResult.visualDescription) {
             editFormEl.querySelector('[name="visualDescription"]').value = tagResult.visualDescription;
           }
-          ['season', 'category', 'layerRole', 'tempSuitability', 'colorGroup', 'type'].forEach((f) => {
+          ['season', 'category', 'layerRole', 'colorGroup', 'type'].forEach((f) => {
             const sel = editFormEl.querySelector(`[name="${f}"]`);
             if (sel && tagResult[f]) sel.value = String(tagResult[f]);
           });
+          if (tagResult.tempSuitability) {
+            this.editTempSuitability = Array.isArray(tagResult.tempSuitability)
+              ? [...tagResult.tempSuitability]
+              : [String(tagResult.tempSuitability)];
+            const tempGroup = editFormEl.querySelector('[data-field="editTempSuitability"]');
+            if (tempGroup) {
+              tempGroup.querySelectorAll('.pill-btn').forEach((b) => {
+                b.classList.toggle('active', this.editTempSuitability.includes(b.dataset.value));
+              });
+            }
+          }
           const delSel = editFormEl.querySelector('[name="delicate"]');
           if (delSel && tagResult.delicate !== undefined) delSel.value = String(Boolean(tagResult.delicate));
         }
@@ -299,6 +317,33 @@ export class GarmentModal {
       }
     });
 
+    // Multi-select temperature suitability pills inside Edit form
+    const editTempGroup = wrapper.querySelector('[data-field="editTempSuitability"]');
+    if (editTempGroup) {
+      editTempGroup.querySelectorAll('.pill-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const val = btn.dataset.value;
+          if (val === 'all-temps') {
+            this.editTempSuitability = ['all-temps'];
+          } else {
+            let next = this.editTempSuitability.filter((t) => t !== 'all-temps');
+            if (next.includes(val)) {
+              next = next.filter((t) => t !== val);
+            } else {
+              next.push(val);
+            }
+            if (next.length === 0) {
+              next = ['all-temps'];
+            }
+            this.editTempSuitability = next;
+          }
+          editTempGroup.querySelectorAll('.pill-btn').forEach((b) => {
+            b.classList.toggle('active', this.editTempSuitability.includes(b.dataset.value));
+          });
+        });
+      });
+    }
+
     // Edit form submit
     const editForm = wrapper.querySelector('#edit-garment-form');
     if (editForm) {
@@ -310,7 +355,10 @@ export class GarmentModal {
           season: fd.get('season'),
           category: fd.get('category'),
           layerRole: fd.get('layerRole') || g.layerRole || 'base',
-          tempSuitability: fd.get('tempSuitability') || g.tempSuitability || 'all-temps',
+          tempSuitability:
+            Array.isArray(this.editTempSuitability) && this.editTempSuitability.length > 0
+              ? this.editTempSuitability
+              : ['all-temps'],
           colorGroup: fd.get('colorGroup'),
           delicate: fd.get('delicate') === 'true',
           type: fd.get('type'),

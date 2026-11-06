@@ -31,40 +31,60 @@ export function inferLayerRole(garment = {}) {
   return 'base';
 }
 
-export function inferTempSuitability(garment = {}) {
-  if (
-    garment.tempSuitability &&
-    ['freezing', 'cold', 'mild', 'warm', 'all-temps'].includes(garment.tempSuitability)
-  ) {
-    return garment.tempSuitability;
+const VALID_TEMP_BANDS = ['freezing', 'cold', 'mild', 'warm', 'all-temps'];
+
+export function inferTempSuitabilityList(garment = {}) {
+  const raw = garment?.tempSuitability;
+  if (Array.isArray(raw)) {
+    const valid = raw.filter((v) => VALID_TEMP_BANDS.includes(v));
+    if (valid.length > 0) return valid;
+  } else if (typeof raw === 'string' && raw.trim()) {
+    const parts = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter((v) => VALID_TEMP_BANDS.includes(v));
+    if (parts.length > 0) return parts;
   }
-  if (garment.season === 'all-season') return 'all-temps';
-  if (garment.season === 'winter') return 'cold';
-  if (garment.season === 'summer') return 'warm';
-  return 'all-temps';
+
+  if (garment?.season === 'all-season') return ['all-temps'];
+  if (garment?.season === 'winter') return ['cold'];
+  if (garment?.season === 'summer') return ['warm'];
+  return ['all-temps'];
+}
+
+export function inferTempSuitability(garment = {}) {
+  const list = inferTempSuitabilityList(garment);
+  return list.length === 1 ? list[0] : list;
 }
 
 export function isGarmentTempCompatible(garment, targetTempBand, role) {
-  const suit = inferTempSuitability(garment);
-  if (suit === 'all-temps' || !targetTempBand) return true;
+  const suitList = inferTempSuitabilityList(garment);
+  if (suitList.includes('all-temps') || !targetTempBand) return true;
 
   // Base layers (t-shirts, shirts) can be worn under jumpers even in cold/freezing weather
   if (role === 'base' && (targetTempBand === 'cold' || targetTempBand === 'freezing')) {
     return true;
   }
 
-  if (targetTempBand === 'warm') {
-    // In hot weather, avoid freezing/cold garments
-    return suit === 'warm' || suit === 'mild';
+  // If the garment uses explicit multi-select array of temperature bands, match selected bands directly
+  if (Array.isArray(garment?.tempSuitability) && garment.tempSuitability.length > 0) {
+    return suitList.includes(targetTempBand);
   }
-  if (targetTempBand === 'freezing') {
-    return suit === 'freezing' || suit === 'cold' || suit === 'mild';
-  }
-  if (targetTempBand === 'cold') {
-    return suit === 'cold' || suit === 'freezing' || suit === 'mild';
-  }
-  // mild
-  return suit !== 'freezing';
+
+  return suitList.some((suit) => {
+    if (targetTempBand === 'warm') {
+      // In hot weather, avoid freezing/cold garments
+      return suit === 'warm' || suit === 'mild';
+    }
+    if (targetTempBand === 'freezing') {
+      return suit === 'freezing' || suit === 'cold' || suit === 'mild';
+    }
+    if (targetTempBand === 'cold') {
+      return suit === 'cold' || suit === 'freezing' || suit === 'mild';
+    }
+    // mild
+    return suit !== 'freezing';
+  });
 }
 
 function getTargetTempBand(weatherData, activeSeason) {
@@ -106,10 +126,10 @@ function scorePairHarmony(itemA, itemB, occasion, targetTempBand) {
   }
 
   // Temperature match bonus
-  const suitA = inferTempSuitability(itemA);
-  const suitB = inferTempSuitability(itemB);
-  if (suitA === targetTempBand) score += 12;
-  if (suitB === targetTempBand) score += 12;
+  const suitA = inferTempSuitabilityList(itemA);
+  const suitB = inferTempSuitabilityList(itemB);
+  if (suitA.includes(targetTempBand)) score += 12;
+  if (suitB.includes(targetTempBand)) score += 12;
 
   // Fit & body proportion balance bonus (from Fit Video / visualDescription)
   const fitA = getFitSilhouette(itemA);
