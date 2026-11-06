@@ -101,7 +101,7 @@ export class AddGarmentView {
           </div>
 
           <div class="form-group">
-            <span class="form-label">Category (Outfit Slot)</span>
+            <span class="form-label">Category</span>
             <div class="pill-selector pill-grid-3" data-field="category">
               <button type="button" class="pill-btn ${this.formState.category === 'top' ? 'active' : ''}" data-val="top">👕 Top</button>
               <button type="button" class="pill-btn ${this.formState.category === 'bottom' ? 'active' : ''}" data-val="bottom">👖 Bottom</button>
@@ -113,7 +113,7 @@ export class AddGarmentView {
           </div>
 
           <div class="form-group">
-            <span class="form-label">Layering Role (For Multi-Layer Outfits like Tee + Jumper)</span>
+            <span class="form-label">Layer</span>
             <div class="pill-selector" data-field="layerRole">
               <button type="button" class="pill-btn ${this.formState.layerRole === 'base' ? 'active' : ''}" data-val="base">👕 Base (Tee / Shirt)</button>
               <button type="button" class="pill-btn ${this.formState.layerRole === 'mid' ? 'active' : ''}" data-val="mid">🧶 Mid (Jumper / Knit / Hoodie)</button>
@@ -135,7 +135,7 @@ export class AddGarmentView {
 
           <div class="form-row-2">
             <div class="form-group">
-              <span class="form-label">Color Group (Laundry)</span>
+              <span class="form-label">Laundry</span>
               <div class="pill-selector" data-field="colorGroup">
                 <button type="button" class="pill-btn ${this.formState.colorGroup === 'coloured' ? 'active' : ''}" data-val="coloured">🎨 Coloured</button>
                 <button type="button" class="pill-btn ${this.formState.colorGroup === 'whites' ? 'active' : ''}" data-val="whites">⚪ Whites</button>
@@ -143,7 +143,7 @@ export class AddGarmentView {
             </div>
 
             <div class="form-group">
-              <span class="form-label">Delicate Care</span>
+              <span class="form-label">Care</span>
               <div class="pill-selector" data-field="delicate">
                 <button type="button" class="pill-btn ${!this.formState.delicate ? 'active' : ''}" data-val="false">No</button>
                 <button type="button" class="pill-btn ${this.formState.delicate ? 'active' : ''}" data-val="true">🫧 Yes</button>
@@ -153,7 +153,7 @@ export class AddGarmentView {
 
           <div class="form-row-2">
             <div class="form-group">
-              <span class="form-label">Type / Occasion</span>
+              <span class="form-label">Occasion</span>
               <div class="pill-selector" data-field="type">
                 <button type="button" class="pill-btn ${this.formState.type === 'everyday' ? 'active' : ''}" data-val="everyday">Everyday</button>
                 <button type="button" class="pill-btn ${this.formState.type === 'gym' ? 'active' : ''}" data-val="gym">Gym</button>
@@ -162,7 +162,7 @@ export class AddGarmentView {
             </div>
 
             <div class="form-group">
-              <span class="form-label">Initial Status</span>
+              <span class="form-label">Status</span>
               <div class="pill-selector" data-field="status">
                 <button type="button" class="pill-btn ${this.formState.status === 'clean' ? 'active' : ''}" data-val="clean">✓ Clean</button>
                 <button type="button" class="pill-btn ${this.formState.status === 'to_wash' ? 'active' : ''}" data-val="to_wash">🧺 To Wash</button>
