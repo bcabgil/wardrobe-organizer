@@ -138,8 +138,7 @@ export class TomorrowStylistView {
     const occasionPillsHtml = occasionList
       .map((occ) => {
         const normOcc = normalizeCategoryValue(occ);
-        const icon = normOcc === 'everyday' ? '☕ ' : normOcc === 'gym' ? '🏋️ ' : normOcc === 'dress-up' ? '🥂 ' : '✨ ';
-        return `<button type="button" class="pill-btn ${normalizeCategoryValue(this.occasion) === normOcc ? 'active' : ''}" data-val="${escapeHtml(normOcc)}">${icon}${escapeHtml(formatCategoryLabel(occ))}</button>`;
+        return `<button type="button" class="pill-btn ${normalizeCategoryValue(this.occasion) === normOcc ? 'active' : ''}" data-val="${escapeHtml(normOcc)}">${escapeHtml(formatCategoryLabel(occ))}</button>`;
       })
       .join('');
 

@@ -86,17 +86,9 @@ export class AddGarmentView {
         const normCat = normalizeCategoryValue(cat);
         const isActive = normCat === activeVal;
         const label = formatCategoryLabel(cat);
-        const icon =
-          normCat === 'coloured'
-            ? '🎨 '
-            : normCat === 'whites'
-              ? '⚪ '
-              : normCat === 'delicate'
-                ? '🫧 '
-                : '';
         return `
           <span class="pill-chip-wrap">
-            <button type="button" class="pill-btn ${isActive ? 'active' : ''}" data-val="${escapeHtml(normCat)}">${icon}${escapeHtml(label)}</button>
+            <button type="button" class="pill-btn ${isActive ? 'active' : ''}" data-val="${escapeHtml(normCat)}">${escapeHtml(label)}</button>
             <button type="button" class="pill-remove-btn" data-remove-cat="${escapeHtml(normCat)}" data-cat-group="${escapeHtml(groupKey)}" data-field="${escapeHtml(fieldName)}" title="Remove ${escapeHtml(label)}" aria-label="Remove ${escapeHtml(label)}">×</button>
           </span>
         `;

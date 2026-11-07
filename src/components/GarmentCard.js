@@ -57,9 +57,9 @@ export class GarmentCard {
 
     const delicateBadgeHtml =
       careCat === 'delicate' || g.delicate
-        ? `<span class="badge-chip badge-delicate" title="Delicate Care">🫧 Delicate</span>`
+        ? `<span class="badge-chip badge-delicate" title="Delicate Care">Delicate</span>`
         : careCat && careCat !== 'other'
-          ? `<span class="badge-chip badge-delicate" title="Care Category">🫧 ${escapeHtml(formatCategoryLabel(careCat))}</span>`
+          ? `<span class="badge-chip badge-delicate" title="Care Category">${escapeHtml(formatCategoryLabel(careCat))}</span>`
           : '';
 
     card.innerHTML = `
