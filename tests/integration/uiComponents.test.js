@@ -235,8 +235,12 @@ describe('UI Components: Cards, Modals & Media Safeguards', () => {
     expect(tempContainer.innerHTML).toContain('Other');
     expect(tempContainer.innerHTML).toContain('Everyday');
     expect(tempContainer.innerHTML).toContain('Dress-up');
+    expect(tempContainer.querySelector('#btn-ai-autotag')).toBeNull();
+    const detailsInput = tempContainer.querySelector('#garment-desc-input');
+    expect(detailsInput).toBeDefined();
+    expect(detailsInput.getAttribute('placeholder')).toBe('Optional');
 
-    // Verify automatic AI metadata description generation
+    // Verify automatic AI metadata description generation + user details inclusion
     const descRes = await generateGarmentMetadataDescription({
       name: 'Navy Merino Sweater',
       category: 'top',
@@ -245,11 +249,13 @@ describe('UI Components: Cards, Modals & Media Safeguards', () => {
       tempSuitability: ['cold', 'mild'],
       colorGroup: 'coloured',
       careCategory: 'delicate',
-      type: 'everyday'
+      type: 'everyday',
+      userDetails: 'Relaxed fit, bought in Milan'
     });
     expect(typeof descRes.visualDescription).toBe('string');
     expect(descRes.visualDescription).toContain('Navy Merino Sweater');
     expect(descRes.visualDescription).toContain('delicate');
+    expect(descRes.visualDescription).toContain('Relaxed fit, bought in Milan');
 
     await addView.unmount();
   });

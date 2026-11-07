@@ -7,10 +7,7 @@ import {
   formatCategoryLabel,
   normalizeCategoryValue
 } from '../db/wardrobeDb.js';
-import {
-  analyzeGarmentPhoto,
-  generateGarmentMetadataDescription
-} from '../services/ai/geminiService.js';
+import { generateGarmentMetadataDescription } from '../services/ai/geminiService.js';
 import { MediaUrlManager, createSafeVideoPlayer } from '../utils/mediaUtils.js';
 import { escapeHtml } from '../utils/domUtils.js';
 import { eventBus } from '../utils/eventBus.js';
@@ -23,7 +20,6 @@ export class AddGarmentView {
     this.urlManager = new MediaUrlManager();
     this.photoFile = null;
     this.videoFile = null;
-    this.lastAiTagResult = null;
     this.customCategories = {
       laundryCategories: ['coloured', 'whites'],
       careCategories: ['delicate', 'other'],
@@ -40,6 +36,7 @@ export class AddGarmentView {
       delicate: false,
       status: 'clean',
       type: 'everyday',
+      userDetails: '',
       visualDescription: ''
     };
   }
@@ -129,9 +126,6 @@ export class AddGarmentView {
                 </div>
               </label>
               <input type="file" id="input-garment-photo" accept="image/*" class="sr-only-input" />
-              <button type="button" id="btn-ai-autotag" class="btn-ai-tag" disabled>
-                ✨ Auto-Fill Attributes with AI
-              </button>
             </div>
 
             <div class="media-upload-box">
@@ -223,8 +217,8 @@ export class AddGarmentView {
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="garment-desc-input">AI Metadata Description <em style="color:var(--text-muted); font-weight:400;">(Generated automatically when added)</em></label>
-            <textarea id="garment-desc-input" name="visualDescription" class="form-textarea" rows="2" placeholder="Automatically generated from your photo, video & attributes when added...">${escapeHtml(this.formState.visualDescription || '')}</textarea>
+            <label class="form-label" for="garment-desc-input">Details</label>
+            <textarea id="garment-desc-input" name="userDetails" class="form-textarea" rows="2" placeholder="Optional">${escapeHtml(this.formState.userDetails || '')}</textarea>
           </div>
 
           <div class="form-submit-row">
@@ -243,14 +237,13 @@ export class AddGarmentView {
     const nameInput = this.container.querySelector('#garment-name-input');
     const descInput = this.container.querySelector('#garment-desc-input');
     if (nameInput) this.formState.name = nameInput.value;
-    if (descInput) this.formState.visualDescription = descInput.value;
+    if (descInput) this.formState.userDetails = descInput.value;
   }
 
   restoreMediaPreviews() {
     if (!this.container) return;
     const photoPreview = this.container.querySelector('#photo-preview-slot');
     const videoPreview = this.container.querySelector('#video-preview-slot');
-    const autoTagBtn = this.container.querySelector('#btn-ai-autotag');
 
     if (this.photoFile && photoPreview) {
       const previewUrl = this.urlManager.createUrl(this.photoFile);
@@ -262,85 +255,6 @@ export class AddGarmentView {
       const player = createSafeVideoPlayer(videoUrl, this.videoFile.type || 'video/mp4');
       player.className = 'upload-preview-video';
       videoPreview.appendChild(player);
-    }
-    if (autoTagBtn) {
-      autoTagBtn.disabled = !(this.photoFile || this.videoFile);
-    }
-  }
-
-  applyAiTagResult(tagResult, { overwriteUserPills = false } = {}) {
-    if (!this.container || !tagResult) return;
-    const nameInput = this.container.querySelector('#garment-name-input');
-    const descInput = this.container.querySelector('#garment-desc-input');
-
-    if (nameInput && tagResult.name && (overwriteUserPills || !nameInput.value.trim())) {
-      nameInput.value = tagResult.name;
-      this.formState.name = tagResult.name;
-    }
-    if (descInput && tagResult.visualDescription) {
-      descInput.value = tagResult.visualDescription;
-      this.formState.visualDescription = tagResult.visualDescription;
-    }
-
-    if (!overwriteUserPills) return;
-
-    ['category', 'season', 'tempSuitability', 'layerRole', 'colorGroup', 'delicate', 'type'].forEach((field) => {
-      if (tagResult[field] !== undefined) {
-        if (field === 'tempSuitability') {
-          const nextArr = Array.isArray(tagResult[field])
-            ? tagResult[field]
-            : [String(tagResult[field])];
-          this.formState.tempSuitability = nextArr;
-          const groupEl = this.container.querySelector(`.pill-selector[data-field="tempSuitability"]`);
-          if (groupEl) {
-            groupEl.querySelectorAll('.pill-btn[data-val]').forEach((btn) => {
-              btn.classList.toggle('active', nextArr.includes(btn.dataset.val));
-            });
-          }
-        } else if (field === 'delicate') {
-          const careVal = tagResult.delicate ? 'delicate' : 'other';
-          this.formState.careCategory = careVal;
-          this.formState.delicate = Boolean(tagResult.delicate);
-          const groupEl = this.container.querySelector(`.pill-selector[data-field="careCategory"]`);
-          if (groupEl) {
-            groupEl.querySelectorAll('.pill-btn[data-val]').forEach((btn) => {
-              btn.classList.toggle('active', btn.dataset.val === careVal);
-            });
-          }
-        } else {
-          this.formState[field] = tagResult[field];
-          const groupEl = this.container.querySelector(`.pill-selector[data-field="${field}"]`);
-          if (groupEl) {
-            groupEl.querySelectorAll('.pill-btn[data-val]').forEach((btn) => {
-              btn.classList.toggle('active', btn.dataset.val === String(tagResult[field]));
-            });
-          }
-        }
-      }
-    });
-  }
-
-  async autoGenerateDescriptionFromMedia() {
-    if (!this.photoFile && !this.videoFile) return;
-    try {
-      const settings = await wardrobeDb.getSettings();
-      const { visualDescription, tagResult } = await generateGarmentMetadataDescription(
-        this.formState,
-        this.photoFile,
-        settings.geminiApiKey || '',
-        this.videoFile
-      );
-      if (tagResult) {
-        this.applyAiTagResult({ ...tagResult, visualDescription }, { overwriteUserPills: false });
-      } else if (visualDescription && this.container) {
-        const descInput = this.container.querySelector('#garment-desc-input');
-        if (descInput && !descInput.value.trim()) {
-          descInput.value = visualDescription;
-          this.formState.visualDescription = visualDescription;
-        }
-      }
-    } catch (_) {
-      // Final fallback runs on form submit
     }
   }
 
@@ -473,30 +387,15 @@ export class AddGarmentView {
     // Photo input
     const photoInput = this.container.querySelector('#input-garment-photo');
     const photoPreview = this.container.querySelector('#photo-preview-slot');
-    const autoTagBtn = this.container.querySelector('#btn-ai-autotag');
-
-    const updateAutoTagButtonState = () => {
-      if (!autoTagBtn) return;
-      autoTagBtn.disabled = !(this.photoFile || this.videoFile);
-      if (this.photoFile && this.videoFile) {
-        autoTagBtn.textContent = '✨ Auto-Fill with Gemini Vision (Photo + Fit Video)';
-      } else if (this.videoFile) {
-        autoTagBtn.textContent = '✨ Auto-Fill with Gemini Vision (Fit Video)';
-      } else {
-        autoTagBtn.textContent = '✨ Auto-Fill with Gemini Vision';
-      }
-    };
 
     photoInput?.addEventListener('change', (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
       this.photoFile = file;
-      this.lastAiTagResult = null;
       const previewUrl = this.urlManager.createUrl(file);
       if (photoPreview) {
         photoPreview.innerHTML = `<img src="${previewUrl}" alt="Selected Garment Preview" class="upload-preview-img" />`;
       }
-      updateAutoTagButtonState();
     });
 
     // Fit Video input
@@ -507,7 +406,6 @@ export class AddGarmentView {
       const file = e.target.files?.[0];
       if (!file) return;
       this.videoFile = file;
-      this.lastAiTagResult = null;
       const videoUrl = this.urlManager.createUrl(file);
       if (videoPreview) {
         videoPreview.innerHTML = '';
@@ -515,83 +413,33 @@ export class AddGarmentView {
         player.className = 'upload-preview-video';
         videoPreview.appendChild(player);
       }
-      updateAutoTagButtonState();
     });
 
-    // AI Auto-Tag button (optional preview before saving; cached so Save does not re-call AI)
-    autoTagBtn?.addEventListener('click', async () => {
-      if (!this.photoFile && !this.videoFile) return;
-      try {
-        LoadingOverlay.show(
-          this.videoFile
-            ? 'Analyzing garment photo & fit video proportions with AI...'
-            : 'Analyzing garment photo with AI...'
-        );
-        const settings = await wardrobeDb.getSettings();
-        const tagResult = await analyzeGarmentPhoto(
-          this.photoFile,
-          settings.geminiApiKey || '',
-          this.videoFile
-        );
-        this.lastAiTagResult = tagResult;
-        this.applyAiTagResult(tagResult, { overwriteUserPills: true });
-
-        showToast(
-          tagResult.engine === 'gemini'
-            ? tagResult.analyzedFitVideo
-              ? '✨ Auto-filled attributes & on-body fit profile from Photo + Fit Video!'
-              : '✨ Auto-filled attributes with Gemini Vision!'
-            : 'Auto-filled attributes (Configure Gemini API Key in Backup/Settings for full AI Vision)',
-          'success'
-        );
-      } catch (err) {
-        showToast(`Could not auto-analyze photo: ${err.message}`, 'error');
-      } finally {
-        LoadingOverlay.hide();
-      }
-    });
-
-    // Form submission — single optimized AI call on save to generate AI metadata & attributes
+    // Form submission — single optimized AI call on save to generate AI metadata description + user details
     const form = this.container.querySelector('#add-garment-form');
     form?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const nameInput = this.container.querySelector('#garment-name-input');
       const descInput = this.container.querySelector('#garment-desc-input');
+      const userDetails = String(descInput?.value || '').trim();
 
       const garmentData = {
         ...this.formState,
         delicate: normalizeCategoryValue(this.formState.careCategory) === 'delicate',
-        name: String(nameInput?.value || '').trim(),
-        visualDescription: String(descInput?.value || '').trim()
+        name: String(nameInput?.value || '').trim() || 'Untitled Garment',
+        userDetails
       };
 
       try {
-        LoadingOverlay.show('Generating AI metadata & saving garment...');
-        if (!garmentData.visualDescription) {
-          if (this.lastAiTagResult && this.lastAiTagResult.visualDescription) {
-            garmentData.visualDescription = this.lastAiTagResult.visualDescription;
-            if (!garmentData.name && this.lastAiTagResult.name) {
-              garmentData.name = this.lastAiTagResult.name;
-            }
-          } else {
-            const settings = await wardrobeDb.getSettings();
-            const { visualDescription, tagResult } = await generateGarmentMetadataDescription(
-              garmentData,
-              this.photoFile,
-              settings.geminiApiKey || '',
-              this.videoFile
-            );
-            this.lastAiTagResult = tagResult;
-            garmentData.visualDescription = visualDescription;
-            if (!garmentData.name && tagResult?.name) {
-              garmentData.name = tagResult.name;
-            }
-          }
-          if (descInput) descInput.value = garmentData.visualDescription;
-        }
-        if (!garmentData.name) {
-          garmentData.name = 'Untitled Garment';
-        }
+        LoadingOverlay.show('Generating AI metadata description & saving garment...');
+        const settings = await wardrobeDb.getSettings();
+        const { visualDescription } = await generateGarmentMetadataDescription(
+          garmentData,
+          this.photoFile,
+          settings.geminiApiKey || '',
+          this.videoFile
+        );
+        garmentData.visualDescription = visualDescription;
 
         const saved = await wardrobeDb.saveGarment(garmentData, this.photoFile, this.videoFile);
         eventBus.emit('wardrobe:changed', { garment: saved });

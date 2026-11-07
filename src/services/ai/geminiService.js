@@ -485,8 +485,8 @@ async function fallbackHeuristicPhotoAnalysis(imageBlob, reason = '', hasFitVide
 }
 
 /**
-   * Build a structured metadata description from garment attributes
-   */
+ * Build a structured metadata description from garment attributes and optional user details
+ */
 export function buildStructuredMetadataDescription(garment = {}, hasFitVideo = false) {
   const name = String(garment.name || 'Garment').trim();
   const season = garment.season || 'all-season';
@@ -499,18 +499,20 @@ export function buildStructuredMetadataDescription(garment = {}, hasFitVideo = f
   const temps = Array.isArray(garment.tempSuitability)
     ? garment.tempSuitability.join(', ')
     : garment.tempSuitability || 'all-temps';
+  const userDetails = String(garment.userDetails ?? garment.details ?? '').trim();
 
   const layerNote =
     category === 'top'
       ? `${layerRole}-layer ${category}`
       : category;
 
-  return `${name} — ${season} ${occasion} ${layerNote} (${colorGroup} palette, ${careCategory} care, suited for ${temps} weather)${hasFitVideo ? ' with on-body fit video reference.' : '.'}`;
+  const baseDesc = `${name} — ${season} ${occasion} ${layerNote} (${colorGroup} palette, ${careCategory} care, suited for ${temps} weather)${hasFitVideo ? ' with on-body fit video reference.' : '.'}`;
+  return userDetails ? `${baseDesc} Details: ${userDetails}` : baseDesc;
 }
 
 /**
- * Automatically generate the AI metadata description of a garment when it is added.
- * Uses Gemini Vision when photo/video + API key are available, otherwise synthesizes a rich metadata description.
+ * Automatically generate the AI metadata description of a garment when it is saved,
+ * combining the AI metadata description with any optional user-inserted details.
  */
 export async function generateGarmentMetadataDescription(
   garment = {},
@@ -519,12 +521,20 @@ export async function generateGarmentMetadataDescription(
   videoBlob = null
 ) {
   const hasFitVideo = Boolean(videoBlob || garment.videoMediaId);
+  const userDetails = String(garment.userDetails ?? garment.details ?? '').trim();
+  const appendUserDetails = (aiDesc) => {
+    const cleanAi = String(aiDesc || '').trim();
+    if (!userDetails) return cleanAi;
+    if (cleanAi.toLowerCase().includes(userDetails.toLowerCase())) return cleanAi;
+    return cleanAi ? `${cleanAi} Details: ${userDetails}` : userDetails;
+  };
+
   if (photoBlob || videoBlob) {
     try {
       const tagResult = await analyzeGarmentPhoto(photoBlob, apiKey, videoBlob);
       if (tagResult && tagResult.engine === 'gemini' && tagResult.visualDescription) {
         return {
-          visualDescription: tagResult.visualDescription,
+          visualDescription: appendUserDetails(tagResult.visualDescription),
           tagResult,
           engine: 'gemini'
         };
