@@ -485,6 +485,71 @@ async function fallbackHeuristicPhotoAnalysis(imageBlob, reason = '', hasFitVide
 }
 
 /**
+   * Build a structured metadata description from garment attributes
+   */
+export function buildStructuredMetadataDescription(garment = {}, hasFitVideo = false) {
+  const name = String(garment.name || 'Garment').trim();
+  const season = garment.season || 'all-season';
+  const category = garment.category || 'top';
+  const layerRole = garment.layerRole || 'base';
+  const colorGroup = garment.colorGroup || 'coloured';
+  const careCategory =
+    garment.careCategory || (garment.delicate ? 'delicate' : 'other');
+  const occasion = garment.type || 'everyday';
+  const temps = Array.isArray(garment.tempSuitability)
+    ? garment.tempSuitability.join(', ')
+    : garment.tempSuitability || 'all-temps';
+
+  const layerNote =
+    category === 'top'
+      ? `${layerRole}-layer ${category}`
+      : category;
+
+  return `${name} — ${season} ${occasion} ${layerNote} (${colorGroup} palette, ${careCategory} care, suited for ${temps} weather)${hasFitVideo ? ' with on-body fit video reference.' : '.'}`;
+}
+
+/**
+ * Automatically generate the AI metadata description of a garment when it is added.
+ * Uses Gemini Vision when photo/video + API key are available, otherwise synthesizes a rich metadata description.
+ */
+export async function generateGarmentMetadataDescription(
+  garment = {},
+  photoBlob = null,
+  apiKey = '',
+  videoBlob = null
+) {
+  const hasFitVideo = Boolean(videoBlob || garment.videoMediaId);
+  if (photoBlob || videoBlob) {
+    try {
+      const tagResult = await analyzeGarmentPhoto(photoBlob, apiKey, videoBlob);
+      if (tagResult && tagResult.engine === 'gemini' && tagResult.visualDescription) {
+        return {
+          visualDescription: tagResult.visualDescription,
+          tagResult,
+          engine: 'gemini'
+        };
+      }
+      return {
+        visualDescription: buildStructuredMetadataDescription(
+          { ...tagResult, ...garment, name: garment.name || tagResult?.name },
+          hasFitVideo
+        ),
+        tagResult,
+        engine: 'offline'
+      };
+    } catch (_) {
+      // Fall through to structured metadata description
+    }
+  }
+
+  return {
+    visualDescription: buildStructuredMetadataDescription(garment, hasFitVideo),
+    tagResult: null,
+    engine: 'offline'
+  };
+}
+
+/**
  * Generate 2-3 curated outfit suggestions for tomorrow using Google Gemini AI
  * Automatically falls back to offlineStylist on missing API key or API/network failure.
  * @param {Object} params

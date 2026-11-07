@@ -1,5 +1,14 @@
 # Project: Wardrobe Organizer & AI Fashion Stylist (100% Browser-Native PWA)
 
+## Core Pillars
+1. **Optimization of AI Calls**: Minimize and strictly control Gemini API requests across the entire app lifecycle:
+   - **Single-Call Garment Onboarding**: AI metadata description and garment attributes are generated only when saving a garment to the wardrobe (never repeatedly while selecting or replacing photos/videos), and cached if previewed beforehand.
+   - **Persistent & In-Memory Outfit Caching**: Generated outfit combinations are cached in `IndexedDB` (`outfitSuggestionsCache` & `lastActiveOutfitSuggestions`) and in memory (`OUTFIT_SUGGESTION_CACHE`). Navigating to the outfit tab or toggling filter options (like Outerwear) reuses and filters cached outfits without triggering redundant AI calls; new AI calls only happen when the user explicitly requests fresh combinations.
+   - **Client-Side Media Compression & Keyframe Extraction**: Photos are scaled on-device (`max 1024px @ 0.82 JPEG`) and fit videos are sampled into lightweight keyframes before calling Gemini Vision.
+   - **100% Autonomous Offline Fallback**: Deterministic rule-based styling and metadata synthesis ensure zero-latency operation when offline or when conserving API quota.
+2. **100% Browser-Native & Offline-First PWA**: Zero backend server; all garments, binary media (`ArrayBuffer`), and settings live locally on the user's phone (`iOS Safari` & `Android Chrome`).
+3. **Independent Wardrobes & Multi-Layer Seasonal Styling**: Strict separation of occasion wardrobes (`Everyday`, `Dress-up`, `Gym`, or custom occasions) with multi-select temperature suitability and multi-layer outfit composition.
+
 ## Architecture
 - **Paradigm**: 100% Browser-Native, Offline-First Progressive Web App (PWA). Zero backend server.
 - **Client Storage**: IndexedDB (`WardrobeDB`) with 4 object stores (`garments`, `media`, `settings`, `outfitHistory`) and WebKit-safe `ArrayBuffer` media storage.

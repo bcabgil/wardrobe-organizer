@@ -3,6 +3,7 @@
  */
 
 import { escapeHtml, getCategoryIconSvg } from '../utils/domUtils.js';
+import { formatCategoryLabel, getGarmentCareCategory } from '../db/wardrobeDb.js';
 
 export class GarmentCard {
   constructor(options = {}) {
@@ -21,8 +22,9 @@ export class GarmentCard {
     const isClean = g.status !== 'to_wash';
     const seasonIcon = g.season === 'winter' ? '❄️' : g.season === 'summer' ? '☀️' : '🔄';
     const seasonLabel = g.season === 'winter' ? 'Winter' : g.season === 'summer' ? 'Summer' : 'All-Season';
-    const colorLabel = g.colorGroup === 'whites' ? 'Whites' : 'Coloured';
-    const typeLabel = g.type === 'gym' ? 'Gym' : g.type === 'dress-up' ? 'Dress-up' : 'Everyday';
+    const colorLabel = formatCategoryLabel(g.colorGroup || 'coloured');
+    const typeLabel = formatCategoryLabel(g.type || 'everyday');
+    const careCat = getGarmentCareCategory(g);
     const tempLabels = {
       freezing: '🧊 <5°C',
       cold: '❄️ 5–14°C',
@@ -53,9 +55,12 @@ export class GarmentCard {
       ? `<span class="badge-fit-video" title="Has Fit Video">▶ Fit Video</span>`
       : '';
 
-    const delicateBadgeHtml = g.delicate
-      ? `<span class="badge-chip badge-delicate" title="Delicate Care">🫧 Delicate</span>`
-      : '';
+    const delicateBadgeHtml =
+      careCat === 'delicate' || g.delicate
+        ? `<span class="badge-chip badge-delicate" title="Delicate Care">🫧 Delicate</span>`
+        : careCat && careCat !== 'other'
+          ? `<span class="badge-chip badge-delicate" title="Care Category">🫧 ${escapeHtml(formatCategoryLabel(careCat))}</span>`
+          : '';
 
     card.innerHTML = `
       <div class="garment-card-media" data-action="open-detail">

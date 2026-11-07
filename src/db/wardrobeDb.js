@@ -15,8 +15,42 @@ export const DEFAULT_SETTINGS = {
   geminiApiKey: '',
   location: '',
   lastBackupAt: null,
-  preferredBackupProvider: 'local_archive'
+  preferredBackupProvider: 'local_archive',
+  laundryCategories: ['coloured', 'whites'],
+  careCategories: ['delicate', 'other'],
+  occasionCategories: ['everyday', 'dress-up']
 };
+
+export function normalizeCategoryValue(label) {
+  return String(label || '')
+    .trim()
+    .toLowerCase();
+}
+
+export function formatCategoryLabel(val) {
+  const raw = String(val || '').trim();
+  const lower = raw.toLowerCase();
+  const known = {
+    coloured: 'Coloured',
+    whites: 'Whites',
+    delicate: 'Delicate',
+    other: 'Other',
+    regular: 'Other',
+    everyday: 'Everyday',
+    'dress-up': 'Dress-up',
+    gym: 'Gym'
+  };
+  if (known[lower]) return known[lower];
+  if (!raw) return '';
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+export function getGarmentCareCategory(garment = {}) {
+  if (garment && garment.careCategory && typeof garment.careCategory === 'string') {
+    return garment.careCategory;
+  }
+  return garment && garment.delicate ? 'delicate' : 'other';
+}
 
 // Helper: Promisify IndexedDB Request
 function promisifyRequest(request) {
@@ -239,13 +273,22 @@ export class WardrobeDB {
       };
     }
 
+    const careCategory =
+      garment.careCategory ||
+      (garment.delicate !== undefined ? (garment.delicate ? 'delicate' : 'other') : 'other');
+    const isDelicate =
+      garment.delicate !== undefined
+        ? Boolean(garment.delicate)
+        : String(careCategory).toLowerCase() === 'delicate';
+
     const garmentToSave = {
       id: garmentId,
       name: garment.name || 'Untitled Garment',
       category: garment.category || 'top',
       season: garment.season || 'all-season',
       colorGroup: garment.colorGroup || 'coloured',
-      delicate: Boolean(garment.delicate),
+      careCategory,
+      delicate: isDelicate,
       status: garment.status || 'clean',
       type: garment.type || 'everyday',
       tempSuitability: inferDefaultTempSuitability(garment),
@@ -356,6 +399,16 @@ export class WardrobeDB {
       throw new Error('Invalid arguments to updateGarment');
     }
 
+    if (updates && typeof updates === 'object') {
+      if (updates.careCategory !== undefined && updates.delicate === undefined) {
+        existing.delicate = String(updates.careCategory).toLowerCase() === 'delicate';
+      } else if (updates.delicate !== undefined && updates.careCategory === undefined) {
+        existing.careCategory = updates.delicate ? 'delicate' : 'other';
+      }
+    }
+    if (!existing.careCategory) {
+      existing.careCategory = existing.delicate ? 'delicate' : 'other';
+    }
     existing.updatedAt = new Date().toISOString();
 
     const db = await this.openDb();
@@ -696,6 +749,55 @@ export class WardrobeDB {
       result[record.key] = record.value;
     }
     return result;
+  }
+
+  /**
+   * Get user-configurable category lists (laundryCategories, careCategories, occasionCategories)
+   */
+  async getCustomCategories() {
+    const settings = await this.getSettings();
+    const laundryCategories =
+      Array.isArray(settings.laundryCategories) && settings.laundryCategories.length > 0
+        ? settings.laundryCategories
+        : [...DEFAULT_SETTINGS.laundryCategories];
+    const careCategories =
+      Array.isArray(settings.careCategories) && settings.careCategories.length > 0
+        ? settings.careCategories
+        : [...DEFAULT_SETTINGS.careCategories];
+    const occasionCategories =
+      Array.isArray(settings.occasionCategories) && settings.occasionCategories.length > 0
+        ? settings.occasionCategories
+        : [...DEFAULT_SETTINGS.occasionCategories];
+
+    return { laundryCategories, careCategories, occasionCategories };
+  }
+
+  /**
+   * Add a new category option to laundryCategories, careCategories, or occasionCategories
+   */
+  async addCategoryOption(groupKey, rawLabel) {
+    const val = normalizeCategoryValue(rawLabel);
+    if (!val) return null;
+    const cats = await this.getCustomCategories();
+    const list = Array.isArray(cats[groupKey]) ? [...cats[groupKey]] : [];
+    if (!list.some((item) => normalizeCategoryValue(item) === val)) {
+      list.push(val);
+      await this.setSetting(groupKey, list);
+    }
+    return { list, value: val };
+  }
+
+  /**
+   * Remove a category option from laundryCategories, careCategories, or occasionCategories
+   */
+  async removeCategoryOption(groupKey, valueToRemove) {
+    const val = normalizeCategoryValue(valueToRemove);
+    const cats = await this.getCustomCategories();
+    const list = (Array.isArray(cats[groupKey]) ? cats[groupKey] : []).filter(
+      (item) => normalizeCategoryValue(item) !== val
+    );
+    await this.setSetting(groupKey, list);
+    return list;
   }
 
   /**

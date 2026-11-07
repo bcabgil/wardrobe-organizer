@@ -7,7 +7,12 @@
  * 4. Coloured — Delicate
  */
 
-import { wardrobeDb } from '../db/wardrobeDb.js';
+import {
+  wardrobeDb,
+  formatCategoryLabel,
+  getGarmentCareCategory,
+  normalizeCategoryValue
+} from '../db/wardrobeDb.js';
 import { eventBus } from '../utils/eventBus.js';
 import { escapeHtml } from '../utils/domUtils.js';
 import { showToast } from '../components/Toast.js';
@@ -21,6 +26,12 @@ export class LaundryView {
       colouredRegular: [],
       colouredDelicate: []
     };
+    this.dirtyGarments = [];
+    this.customCategories = {
+      laundryCategories: ['coloured', 'whites'],
+      careCategories: ['delicate', 'other']
+    };
+    this.basketsByKey = {};
     this._unsub = null;
   }
 
@@ -36,42 +47,75 @@ export class LaundryView {
   }
 
   async loadLoads() {
-    this.loads = await wardrobeDb.getLaundryLoads();
+    const [loads, allGarments, customCategories] = await Promise.all([
+      wardrobeDb.getLaundryLoads(),
+      wardrobeDb.getAllGarments(),
+      wardrobeDb.getCustomCategories()
+    ]);
+    this.loads = loads || {};
+    this.dirtyGarments = (allGarments || []).filter((g) => g.status === 'to_wash');
+    if (customCategories) {
+      this.customCategories = customCategories;
+    }
+  }
+
+  buildDynamicBaskets() {
+    const laundryCats = [...(this.customCategories.laundryCategories || ['coloured', 'whites'])];
+    const careCats = [...(this.customCategories.careCategories || ['delicate', 'other'])];
+
+    for (const g of this.dirtyGarments) {
+      const cGroup = normalizeCategoryValue(g.colorGroup || 'coloured');
+      const careCat = normalizeCategoryValue(getGarmentCareCategory(g));
+      if (cGroup && !laundryCats.some((x) => normalizeCategoryValue(x) === cGroup)) {
+        laundryCats.push(cGroup);
+      }
+      if (careCat && !careCats.some((x) => normalizeCategoryValue(x) === careCat)) {
+        careCats.push(careCat);
+      }
+    }
+
+    const baskets = [];
+    this.basketsByKey = {};
+
+    for (const lCat of laundryCats) {
+      for (const cCat of careCats) {
+        const normL = normalizeCategoryValue(lCat);
+        const normC = normalizeCategoryValue(cCat);
+        const key = `${normL}__${normC}`;
+        const items = this.dirtyGarments.filter(
+          (g) =>
+            normalizeCategoryValue(g.colorGroup || 'coloured') === normL &&
+            normalizeCategoryValue(getGarmentCareCategory(g)) === normC
+        );
+        const lLabel = formatCategoryLabel(normL);
+        const cLabel = formatCategoryLabel(normC);
+        const icon =
+          normC === 'delicate'
+            ? '🫧'
+            : normL === 'whites'
+              ? '⚪'
+              : normL === 'coloured'
+                ? '🎨'
+                : '🧺';
+        const basket = {
+          key,
+          title: `${lLabel} — ${cLabel} Load`,
+          subtitle: `${lLabel} garments with ${cLabel.toLowerCase()} care`,
+          icon,
+          items
+        };
+        baskets.push(basket);
+        this.basketsByKey[key] = items;
+      }
+    }
+
+    return baskets;
   }
 
   render() {
     if (!this.container) return;
 
-    const baskets = [
-      {
-        key: 'whitesRegular',
-        title: 'Whites — Regular Load',
-        subtitle: 'Standard cottons & durable whites (40°C / regular spin)',
-        icon: '⚪',
-        items: this.loads.whitesRegular || []
-      },
-      {
-        key: 'whitesDelicate',
-        title: 'Whites — Delicate Load',
-        subtitle: 'Silk, wool, cashmere & delicate whites (Cold / gentle wash)',
-        icon: '🫧',
-        items: this.loads.whitesDelicate || []
-      },
-      {
-        key: 'colouredRegular',
-        title: 'Coloured — Regular Load',
-        subtitle: 'Everyday coloured clothes, denim & gym wear (30°C)',
-        icon: '🎨',
-        items: this.loads.colouredRegular || []
-      },
-      {
-        key: 'colouredDelicate',
-        title: 'Coloured — Delicate Load',
-        subtitle: 'Delicate knits, wool & dress-up coloured items (Cold / hand wash)',
-        icon: '🧣',
-        items: this.loads.colouredDelicate || []
-      }
-    ];
+    const baskets = this.buildDynamicBaskets();
 
     const totalDirty = baskets.reduce((acc, b) => acc + b.items.length, 0);
 
@@ -137,7 +181,7 @@ export class LaundryView {
     this.container.querySelectorAll('[data-clean-basket]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const basketKey = btn.dataset.cleanBasket;
-        const items = this.loads[basketKey] || [];
+        const items = this.basketsByKey[basketKey] || this.loads[basketKey] || [];
         if (items.length === 0) return;
 
         const ids = items.map((g) => g.id);

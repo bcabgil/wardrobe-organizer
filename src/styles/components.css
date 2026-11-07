@@ -144,6 +144,71 @@
   border-color: var(--accent-gold);
 }
 
+.pill-chip-wrap {
+  display: inline-flex;
+  align-items: stretch;
+  flex: 1 1 auto;
+}
+
+.pill-chip-wrap .pill-btn {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+
+.pill-remove-btn {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  border-top-right-radius: var(--radius-sm);
+  border-bottom-right-radius: var(--radius-sm);
+  padding: 0 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.pill-chip-wrap .pill-btn.active + .pill-remove-btn {
+  background: var(--accent-gold-dim);
+  color: var(--accent-gold);
+  border-color: var(--accent-gold);
+}
+
+.pill-remove-btn:hover {
+  color: #f85149;
+}
+
+.pill-add-btn {
+  flex: 0 0 auto;
+  border-style: dashed;
+  color: var(--accent-gold);
+  padding: 9px 12px;
+}
+
+.custom-cat-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.custom-cat-input-row.hidden {
+  display: none;
+}
+
+.custom-cat-input {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+}
+
+.btn-confirm-cat {
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
 /* Bottom Navigation */
 .app-bottom-nav-wrap {
   position: fixed;

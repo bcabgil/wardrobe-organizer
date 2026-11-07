@@ -4,7 +4,7 @@
  * inline fit video previews, and one-tap "Wear This Outfit" status updater.
  */
 
-import { wardrobeDb } from '../db/wardrobeDb.js';
+import { wardrobeDb, formatCategoryLabel, normalizeCategoryValue } from '../db/wardrobeDb.js';
 import { suggestTomorrowOutfits } from '../services/ai/geminiService.js';
 import { sortOutfitsByWearPreference, buildCombinationKey } from '../services/ai/offlineStylist.js';
 import { getTomorrowWeather } from '../services/weather/weatherService.js';
@@ -121,6 +121,27 @@ export class TomorrowStylistView {
       .join('');
 
     const w = this.weather || {};
+    const occasionList = [
+      ...(Array.isArray(this.settings.occasionCategories) && this.settings.occasionCategories.length > 0
+        ? this.settings.occasionCategories
+        : ['everyday', 'dress-up'])
+    ];
+    for (const g of this.garments) {
+      const t = normalizeCategoryValue(g.type);
+      if (t && !occasionList.some((x) => normalizeCategoryValue(x) === t)) {
+        occasionList.push(t);
+      }
+    }
+    if (!occasionList.some((x) => normalizeCategoryValue(x) === normalizeCategoryValue(this.occasion))) {
+      this.occasion = occasionList[0] || 'everyday';
+    }
+    const occasionPillsHtml = occasionList
+      .map((occ) => {
+        const normOcc = normalizeCategoryValue(occ);
+        const icon = normOcc === 'everyday' ? '☕ ' : normOcc === 'gym' ? '🏋️ ' : normOcc === 'dress-up' ? '🥂 ' : '✨ ';
+        return `<button type="button" class="pill-btn ${normalizeCategoryValue(this.occasion) === normOcc ? 'active' : ''}" data-val="${escapeHtml(normOcc)}">${icon}${escapeHtml(formatCategoryLabel(occ))}</button>`;
+      })
+      .join('');
 
     this.container.innerHTML = `
       <section class="view-section stylist-view">
@@ -143,9 +164,7 @@ export class TomorrowStylistView {
           <div class="form-group">
             <span class="form-label">Tomorrow's Occasion</span>
             <div class="pill-selector" id="stylist-occasion-pills">
-              <button type="button" class="pill-btn ${this.occasion === 'everyday' ? 'active' : ''}" data-val="everyday">☕ Everyday</button>
-              <button type="button" class="pill-btn ${this.occasion === 'gym' ? 'active' : ''}" data-val="gym">🏋️ Gym</button>
-              <button type="button" class="pill-btn ${this.occasion === 'dress-up' ? 'active' : ''}" data-val="dress-up">🥂 Dress-up</button>
+              ${occasionPillsHtml}
             </div>
           </div>
 

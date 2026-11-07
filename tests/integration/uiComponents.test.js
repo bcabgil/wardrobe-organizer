@@ -194,4 +194,63 @@ describe('UI Components: Cards, Modals & Media Safeguards', () => {
     expect(tempContainer.querySelector('#btn-switch-active-season')).toBeDefined();
     await gallery.unmount();
   });
+
+  it('T1-UI-05: AddGarmentView supports customizable Laundry, Care, and Occasion categories and auto-generates AI metadata description on save', async () => {
+    const dbRes = await safeImport('../../src/db/wardrobeDb.js');
+    const aViewRes = await safeImport('../../src/views/AddGarmentView.js');
+    const gemRes = await safeImport('../../src/services/ai/geminiService.js');
+    expect(dbRes.ok).toBe(true);
+    expect(aViewRes.ok).toBe(true);
+    expect(gemRes.ok).toBe(true);
+
+    const { wardrobeDb, DEFAULT_SETTINGS } = dbRes.module;
+    const { AddGarmentView } = aViewRes.module;
+    const { generateGarmentMetadataDescription } = gemRes.module;
+
+    // Reset category settings to defaults
+    await wardrobeDb.setSetting('laundryCategories', [...DEFAULT_SETTINGS.laundryCategories]);
+    await wardrobeDb.setSetting('careCategories', [...DEFAULT_SETTINGS.careCategories]);
+    await wardrobeDb.setSetting('occasionCategories', [...DEFAULT_SETTINGS.occasionCategories]);
+
+    const cats = await wardrobeDb.getCustomCategories();
+    expect(cats.laundryCategories).toEqual(['coloured', 'whites']);
+    expect(cats.careCategories).toEqual(['delicate', 'other']);
+    expect(cats.occasionCategories).toEqual(['everyday', 'dress-up']);
+
+    // Add and remove custom categories
+    const addedOcc = await wardrobeDb.addCategoryOption('occasionCategories', 'Gym');
+    expect(addedOcc.list).toContain('gym');
+
+    const afterRemove = await wardrobeDb.removeCategoryOption('occasionCategories', 'gym');
+    expect(afterRemove.includes('gym')).toBe(false);
+
+    // Mount AddGarmentView and verify default pills render
+    const tempContainer = document.createElement('div');
+    const addView = new AddGarmentView();
+    await addView.mount(tempContainer);
+
+    expect(tempContainer.innerHTML).toContain('Coloured');
+    expect(tempContainer.innerHTML).toContain('Whites');
+    expect(tempContainer.innerHTML).toContain('Delicate');
+    expect(tempContainer.innerHTML).toContain('Other');
+    expect(tempContainer.innerHTML).toContain('Everyday');
+    expect(tempContainer.innerHTML).toContain('Dress-up');
+
+    // Verify automatic AI metadata description generation
+    const descRes = await generateGarmentMetadataDescription({
+      name: 'Navy Merino Sweater',
+      category: 'top',
+      layerRole: 'mid',
+      season: 'winter',
+      tempSuitability: ['cold', 'mild'],
+      colorGroup: 'coloured',
+      careCategory: 'delicate',
+      type: 'everyday'
+    });
+    expect(typeof descRes.visualDescription).toBe('string');
+    expect(descRes.visualDescription).toContain('Navy Merino Sweater');
+    expect(descRes.visualDescription).toContain('delicate');
+
+    await addView.unmount();
+  });
 });

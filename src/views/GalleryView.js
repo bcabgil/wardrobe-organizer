@@ -2,7 +2,7 @@
  * GalleryView.js - Wardrobe Catalog with Active Season Switcher, Filter Chips, and Fit Video Detail Modal
  */
 
-import { wardrobeDb } from '../db/wardrobeDb.js';
+import { wardrobeDb, formatCategoryLabel, normalizeCategoryValue } from '../db/wardrobeDb.js';
 import { MediaUrlManager } from '../utils/mediaUtils.js';
 import { eventBus } from '../utils/eventBus.js';
 import { escapeHtml } from '../utils/domUtils.js';
@@ -42,12 +42,18 @@ export class GalleryView {
   }
 
   async loadData() {
-    const [garments, settings] = await Promise.all([
+    const [garments, settings, customCategories] = await Promise.all([
       wardrobeDb.getAllGarments(),
-      wardrobeDb.getSettings()
+      wardrobeDb.getSettings(),
+      wardrobeDb.getCustomCategories()
     ]);
     this.garments = garments || [];
     this.activeSeason = (settings && settings.activeSeason) || 'winter';
+    this.customCategories = customCategories || {
+      laundryCategories: ['coloured', 'whites'],
+      careCategories: ['delicate', 'other'],
+      occasionCategories: ['everyday', 'dress-up']
+    };
   }
 
   getFilteredGarments() {
@@ -84,6 +90,13 @@ export class GalleryView {
     const isWinter = this.activeSeason === 'winter';
     const cleanCount = this.garments.filter((g) => g.status === 'clean').length;
     const washCount = this.garments.filter((g) => g.status === 'to_wash').length;
+    const occasionList = [...(this.customCategories?.occasionCategories || ['everyday', 'dress-up'])];
+    for (const g of this.garments) {
+      const t = normalizeCategoryValue(g.type);
+      if (t && !occasionList.some((x) => normalizeCategoryValue(x) === t)) {
+        occasionList.push(t);
+      }
+    }
 
     this.container.innerHTML = `
       <section class="view-section gallery-view">
@@ -119,9 +132,12 @@ export class GalleryView {
 
           <div class="chip-scroll-row" data-filter-group="type">
             <button type="button" class="filter-chip ${this.filters.type === 'all' ? 'active' : ''}" data-val="all">All Occasions</button>
-            <button type="button" class="filter-chip ${this.filters.type === 'everyday' ? 'active' : ''}" data-val="everyday">Everyday</button>
-            <button type="button" class="filter-chip ${this.filters.type === 'gym' ? 'active' : ''}" data-val="gym">Gym</button>
-            <button type="button" class="filter-chip ${this.filters.type === 'dress-up' ? 'active' : ''}" data-val="dress-up">Dress-up</button>
+            ${occasionList
+              .map(
+                (occ) =>
+                  `<button type="button" class="filter-chip ${normalizeCategoryValue(this.filters.type) === normalizeCategoryValue(occ) ? 'active' : ''}" data-val="${escapeHtml(normalizeCategoryValue(occ))}">${escapeHtml(formatCategoryLabel(occ))}</button>`
+              )
+              .join('')}
           </div>
 
           <div class="chip-scroll-row" data-filter-group="category">

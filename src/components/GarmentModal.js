@@ -4,7 +4,12 @@
 
 import { escapeHtml, getCategoryIconSvg } from '../utils/domUtils.js';
 import { createSafeVideoPlayer, MediaUrlManager } from '../utils/mediaUtils.js';
-import { wardrobeDb } from '../db/wardrobeDb.js';
+import {
+  wardrobeDb,
+  formatCategoryLabel,
+  getGarmentCareCategory,
+  normalizeCategoryValue
+} from '../db/wardrobeDb.js';
 import { analyzeGarmentPhoto } from '../services/ai/geminiService.js';
 import { eventBus } from '../utils/eventBus.js';
 import { showToast } from './Toast.js';
@@ -42,6 +47,12 @@ export class GarmentModal {
       }
     }
 
+    this.customCategories = await wardrobeDb.getCustomCategories().catch(() => ({
+      laundryCategories: ['coloured', 'whites'],
+      careCategories: ['delicate', 'other'],
+      occasionCategories: ['everyday', 'dress-up']
+    }));
+
     this.modalEl = this.render({ photoUrl, videoUrl, videoMime });
     container.appendChild(this.modalEl);
     return this.modalEl;
@@ -61,6 +72,23 @@ export class GarmentModal {
         : ['all-temps'];
     this.editTempSuitability = currentTemps.length > 0 ? currentTemps : ['all-temps'];
     const tempDisplayLabel = this.editTempSuitability.join(', ');
+    const currentCareCat = getGarmentCareCategory(g);
+    const cats = this.customCategories || {
+      laundryCategories: ['coloured', 'whites'],
+      careCategories: ['delicate', 'other'],
+      occasionCategories: ['everyday', 'dress-up']
+    };
+    const mergeUnique = (list, currentVal) => {
+      const normCur = normalizeCategoryValue(currentVal);
+      const base = Array.isArray(list) ? [...list] : [];
+      if (normCur && !base.some((x) => normalizeCategoryValue(x) === normCur)) {
+        base.push(normCur);
+      }
+      return base;
+    };
+    const laundryOptions = mergeUnique(cats.laundryCategories, g.colorGroup || 'coloured');
+    const careOptions = mergeUnique(cats.careCategories, currentCareCat);
+    const occasionOptions = mergeUnique(cats.occasionCategories, g.type || 'everyday');
 
     wrapper.innerHTML = `
       <div class="modal-sheet">
@@ -90,9 +118,9 @@ export class GarmentModal {
               <div class="attr-pill"><span>Category</span><strong>${escapeHtml(g.category || 'top')}</strong></div>
               <div class="attr-pill"><span>Layer Role</span><strong>${escapeHtml(g.layerRole || 'base')}</strong></div>
               <div class="attr-pill"><span>Temp Range</span><strong>${escapeHtml(tempDisplayLabel)}</strong></div>
-              <div class="attr-pill"><span>Occasion</span><strong>${escapeHtml(g.type || 'everyday')}</strong></div>
-              <div class="attr-pill"><span>Color Group</span><strong>${escapeHtml(g.colorGroup || 'coloured')}</strong></div>
-              <div class="attr-pill"><span>Delicate</span><strong>${g.delicate ? 'Yes (Delicate)' : 'No (Regular)'}</strong></div>
+              <div class="attr-pill"><span>Occasion</span><strong>${escapeHtml(formatCategoryLabel(g.type || 'everyday'))}</strong></div>
+              <div class="attr-pill"><span>Laundry</span><strong>${escapeHtml(formatCategoryLabel(g.colorGroup || 'coloured'))}</strong></div>
+              <div class="attr-pill"><span>Care</span><strong>${escapeHtml(formatCategoryLabel(currentCareCat))}</strong></div>
               <div class="attr-pill"><span>Status</span><strong>${isClean ? 'Clean' : 'To Wash'}</strong></div>
             </div>
             ${
@@ -158,25 +186,36 @@ export class GarmentModal {
                 </div>
               </div>
               <div class="form-row-2">
-                <label class="form-label">Color Group
+                <label class="form-label">Laundry
                   <select name="colorGroup" class="form-select">
-                    <option value="coloured" ${g.colorGroup === 'coloured' ? 'selected' : ''}>🎨 Coloured</option>
-                    <option value="whites" ${g.colorGroup === 'whites' ? 'selected' : ''}>⚪ Whites</option>
+                    ${laundryOptions
+                      .map(
+                        (opt) =>
+                          `<option value="${escapeHtml(opt)}" ${normalizeCategoryValue(g.colorGroup || 'coloured') === normalizeCategoryValue(opt) ? 'selected' : ''}>${escapeHtml(formatCategoryLabel(opt))}</option>`
+                      )
+                      .join('')}
                   </select>
                 </label>
-                <label class="form-label">Delicate Care
-                  <select name="delicate" class="form-select">
-                    <option value="false" ${!g.delicate ? 'selected' : ''}>No (Regular)</option>
-                    <option value="true" ${g.delicate ? 'selected' : ''}>🫧 Yes (Delicate)</option>
+                <label class="form-label">Care
+                  <select name="careCategory" class="form-select">
+                    ${careOptions
+                      .map(
+                        (opt) =>
+                          `<option value="${escapeHtml(opt)}" ${normalizeCategoryValue(currentCareCat) === normalizeCategoryValue(opt) ? 'selected' : ''}>${escapeHtml(formatCategoryLabel(opt))}</option>`
+                      )
+                      .join('')}
                   </select>
                 </label>
               </div>
               <div class="form-row-2">
-                <label class="form-label">Type / Occasion
+                <label class="form-label">Occasion
                   <select name="type" class="form-select">
-                    <option value="everyday" ${g.type === 'everyday' ? 'selected' : ''}>Everyday</option>
-                    <option value="gym" ${g.type === 'gym' ? 'selected' : ''}>Gym</option>
-                    <option value="dress-up" ${g.type === 'dress-up' ? 'selected' : ''}>Dress-up</option>
+                    ${occasionOptions
+                      .map(
+                        (opt) =>
+                          `<option value="${escapeHtml(opt)}" ${normalizeCategoryValue(g.type || 'everyday') === normalizeCategoryValue(opt) ? 'selected' : ''}>${escapeHtml(formatCategoryLabel(opt))}</option>`
+                      )
+                      .join('')}
                   </select>
                 </label>
                 <label class="form-label">Status
@@ -301,8 +340,10 @@ export class GarmentModal {
               });
             }
           }
-          const delSel = editFormEl.querySelector('[name="delicate"]');
-          if (delSel && tagResult.delicate !== undefined) delSel.value = String(Boolean(tagResult.delicate));
+          const careSel = editFormEl.querySelector('[name="careCategory"]');
+          if (careSel && tagResult.delicate !== undefined) {
+            careSel.value = tagResult.delicate ? 'delicate' : 'other';
+          }
         }
         LoadingOverlay.hide();
         showToast(
@@ -360,7 +401,8 @@ export class GarmentModal {
               ? this.editTempSuitability
               : ['all-temps'],
           colorGroup: fd.get('colorGroup'),
-          delicate: fd.get('delicate') === 'true',
+          careCategory: fd.get('careCategory') || currentCareCat || 'other',
+          delicate: normalizeCategoryValue(fd.get('careCategory') || currentCareCat) === 'delicate',
           type: fd.get('type'),
           status: fd.get('status'),
           visualDescription: String(fd.get('visualDescription') || '').trim()

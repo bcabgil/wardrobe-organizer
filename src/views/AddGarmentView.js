@@ -2,9 +2,17 @@
  * AddGarmentView.js - Register New Garment with Photo, Fit Video, Gemini Vision Auto-Tagger & Pill Indications
  */
 
-import { wardrobeDb } from '../db/wardrobeDb.js';
-import { analyzeGarmentPhoto } from '../services/ai/geminiService.js';
+import {
+  wardrobeDb,
+  formatCategoryLabel,
+  normalizeCategoryValue
+} from '../db/wardrobeDb.js';
+import {
+  analyzeGarmentPhoto,
+  generateGarmentMetadataDescription
+} from '../services/ai/geminiService.js';
 import { MediaUrlManager, createSafeVideoPlayer } from '../utils/mediaUtils.js';
+import { escapeHtml } from '../utils/domUtils.js';
 import { eventBus } from '../utils/eventBus.js';
 import { showToast } from '../components/Toast.js';
 import { LoadingOverlay } from '../components/LoadingOverlay.js';
@@ -15,6 +23,12 @@ export class AddGarmentView {
     this.urlManager = new MediaUrlManager();
     this.photoFile = null;
     this.videoFile = null;
+    this.lastAiTagResult = null;
+    this.customCategories = {
+      laundryCategories: ['coloured', 'whites'],
+      careCategories: ['delicate', 'other'],
+      occasionCategories: ['everyday', 'dress-up']
+    };
     this.formState = {
       name: '',
       category: 'top',
@@ -22,6 +36,7 @@ export class AddGarmentView {
       tempSuitability: ['cold'],
       layerRole: 'base',
       colorGroup: 'coloured',
+      careCategory: 'other',
       delicate: false,
       status: 'clean',
       type: 'everyday',
@@ -31,10 +46,28 @@ export class AddGarmentView {
 
   async mount(container) {
     this.container = container;
-    const settings = await wardrobeDb.getSettings();
+    const [settings, customCategories] = await Promise.all([
+      wardrobeDb.getSettings(),
+      wardrobeDb.getCustomCategories()
+    ]);
+    if (customCategories) {
+      this.customCategories = customCategories;
+    }
     if (settings && settings.activeSeason) {
       this.formState.season = settings.activeSeason;
       this.formState.tempSuitability = [settings.activeSeason === 'winter' ? 'cold' : 'warm'];
+    }
+    if (!this.customCategories.laundryCategories.includes(this.formState.colorGroup)) {
+      this.formState.colorGroup = this.customCategories.laundryCategories[0] || 'coloured';
+    }
+    if (!this.customCategories.careCategories.includes(this.formState.careCategory)) {
+      this.formState.careCategory = this.customCategories.careCategories.includes('other')
+        ? 'other'
+        : this.customCategories.careCategories[0] || 'other';
+      this.formState.delicate = this.formState.careCategory === 'delicate';
+    }
+    if (!this.customCategories.occasionCategories.includes(this.formState.type)) {
+      this.formState.type = this.customCategories.occasionCategories[0] || 'everyday';
     }
     this.render();
   }
@@ -43,6 +76,43 @@ export class AddGarmentView {
     const cur = this.formState.tempSuitability;
     if (Array.isArray(cur)) return cur.includes(val);
     return cur === val;
+  }
+
+  renderCustomizableCategoryPills(groupKey, fieldName) {
+    const categories = this.customCategories[groupKey] || [];
+    const activeVal = normalizeCategoryValue(this.formState[fieldName]);
+    const pillsHtml = categories
+      .map((cat) => {
+        const normCat = normalizeCategoryValue(cat);
+        const isActive = normCat === activeVal;
+        const label = formatCategoryLabel(cat);
+        const icon =
+          normCat === 'coloured'
+            ? '🎨 '
+            : normCat === 'whites'
+              ? '⚪ '
+              : normCat === 'delicate'
+                ? '🫧 '
+                : '';
+        return `
+          <span class="pill-chip-wrap">
+            <button type="button" class="pill-btn ${isActive ? 'active' : ''}" data-val="${escapeHtml(normCat)}">${icon}${escapeHtml(label)}</button>
+            <button type="button" class="pill-remove-btn" data-remove-cat="${escapeHtml(normCat)}" data-cat-group="${escapeHtml(groupKey)}" data-field="${escapeHtml(fieldName)}" title="Remove ${escapeHtml(label)}" aria-label="Remove ${escapeHtml(label)}">×</button>
+          </span>
+        `;
+      })
+      .join('');
+
+    return `
+      <div class="pill-selector" data-field="${escapeHtml(fieldName)}" data-cat-group="${escapeHtml(groupKey)}">
+        ${pillsHtml}
+        <button type="button" class="pill-btn pill-add-btn" data-toggle-add-cat="${escapeHtml(groupKey)}" title="Add category">+ Add</button>
+      </div>
+      <div class="custom-cat-input-row hidden" data-add-cat-row="${escapeHtml(groupKey)}">
+        <input type="text" class="form-input custom-cat-input" data-cat-input="${escapeHtml(groupKey)}" placeholder="New category name..." />
+        <button type="button" class="btn-secondary btn-confirm-cat" data-confirm-add-cat="${escapeHtml(groupKey)}" data-field="${escapeHtml(fieldName)}">Add</button>
+      </div>
+    `;
   }
 
   render() {
@@ -87,7 +157,7 @@ export class AddGarmentView {
           <!-- GARMENT NAME -->
           <div class="form-group">
             <label class="form-label" for="garment-name-input">Garment Name</label>
-            <input type="text" id="garment-name-input" name="name" class="form-input" placeholder="e.g., Cream Cable-Knit Sweater" required />
+            <input type="text" id="garment-name-input" name="name" class="form-input" placeholder="e.g., Cream Cable-Knit Sweater" value="${escapeHtml(this.formState.name || '')}" required />
           </div>
 
           <!-- PILL INDICATIONS -->
@@ -136,29 +206,19 @@ export class AddGarmentView {
           <div class="form-row-2">
             <div class="form-group">
               <span class="form-label">Laundry</span>
-              <div class="pill-selector" data-field="colorGroup">
-                <button type="button" class="pill-btn ${this.formState.colorGroup === 'coloured' ? 'active' : ''}" data-val="coloured">🎨 Coloured</button>
-                <button type="button" class="pill-btn ${this.formState.colorGroup === 'whites' ? 'active' : ''}" data-val="whites">⚪ Whites</button>
-              </div>
+              ${this.renderCustomizableCategoryPills('laundryCategories', 'colorGroup')}
             </div>
 
             <div class="form-group">
               <span class="form-label">Care</span>
-              <div class="pill-selector" data-field="delicate">
-                <button type="button" class="pill-btn ${!this.formState.delicate ? 'active' : ''}" data-val="false">No</button>
-                <button type="button" class="pill-btn ${this.formState.delicate ? 'active' : ''}" data-val="true">🫧 Yes</button>
-              </div>
+              ${this.renderCustomizableCategoryPills('careCategories', 'careCategory')}
             </div>
           </div>
 
           <div class="form-row-2">
             <div class="form-group">
               <span class="form-label">Occasion</span>
-              <div class="pill-selector" data-field="type">
-                <button type="button" class="pill-btn ${this.formState.type === 'everyday' ? 'active' : ''}" data-val="everyday">Everyday</button>
-                <button type="button" class="pill-btn ${this.formState.type === 'gym' ? 'active' : ''}" data-val="gym">Gym</button>
-                <button type="button" class="pill-btn ${this.formState.type === 'dress-up' ? 'active' : ''}" data-val="dress-up">Dress-up</button>
-              </div>
+              ${this.renderCustomizableCategoryPills('occasionCategories', 'type')}
             </div>
 
             <div class="form-group">
@@ -171,8 +231,8 @@ export class AddGarmentView {
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="garment-desc-input">Visual Style & Color Notes (Used by AI Outfit Stylist)</label>
-            <textarea id="garment-desc-input" name="visualDescription" class="form-textarea" rows="2" placeholder="e.g., Warm camel wool coat with relaxed lapels, pairs well with navy or cream knits..."></textarea>
+            <label class="form-label" for="garment-desc-input">AI Metadata Description <em style="color:var(--text-muted); font-weight:400;">(Generated automatically when added)</em></label>
+            <textarea id="garment-desc-input" name="visualDescription" class="form-textarea" rows="2" placeholder="Automatically generated from your photo, video & attributes when added...">${escapeHtml(this.formState.visualDescription || '')}</textarea>
           </div>
 
           <div class="form-submit-row">
@@ -182,7 +242,114 @@ export class AddGarmentView {
       </section>
     `;
 
+    this.restoreMediaPreviews();
     this.bindEvents();
+  }
+
+  syncInputsToFormState() {
+    if (!this.container) return;
+    const nameInput = this.container.querySelector('#garment-name-input');
+    const descInput = this.container.querySelector('#garment-desc-input');
+    if (nameInput) this.formState.name = nameInput.value;
+    if (descInput) this.formState.visualDescription = descInput.value;
+  }
+
+  restoreMediaPreviews() {
+    if (!this.container) return;
+    const photoPreview = this.container.querySelector('#photo-preview-slot');
+    const videoPreview = this.container.querySelector('#video-preview-slot');
+    const autoTagBtn = this.container.querySelector('#btn-ai-autotag');
+
+    if (this.photoFile && photoPreview) {
+      const previewUrl = this.urlManager.createUrl(this.photoFile);
+      photoPreview.innerHTML = `<img src="${previewUrl}" alt="Selected Garment Preview" class="upload-preview-img" />`;
+    }
+    if (this.videoFile && videoPreview) {
+      const videoUrl = this.urlManager.createUrl(this.videoFile);
+      videoPreview.innerHTML = '';
+      const player = createSafeVideoPlayer(videoUrl, this.videoFile.type || 'video/mp4');
+      player.className = 'upload-preview-video';
+      videoPreview.appendChild(player);
+    }
+    if (autoTagBtn) {
+      autoTagBtn.disabled = !(this.photoFile || this.videoFile);
+    }
+  }
+
+  applyAiTagResult(tagResult, { overwriteUserPills = false } = {}) {
+    if (!this.container || !tagResult) return;
+    const nameInput = this.container.querySelector('#garment-name-input');
+    const descInput = this.container.querySelector('#garment-desc-input');
+
+    if (nameInput && tagResult.name && (overwriteUserPills || !nameInput.value.trim())) {
+      nameInput.value = tagResult.name;
+      this.formState.name = tagResult.name;
+    }
+    if (descInput && tagResult.visualDescription) {
+      descInput.value = tagResult.visualDescription;
+      this.formState.visualDescription = tagResult.visualDescription;
+    }
+
+    if (!overwriteUserPills) return;
+
+    ['category', 'season', 'tempSuitability', 'layerRole', 'colorGroup', 'delicate', 'type'].forEach((field) => {
+      if (tagResult[field] !== undefined) {
+        if (field === 'tempSuitability') {
+          const nextArr = Array.isArray(tagResult[field])
+            ? tagResult[field]
+            : [String(tagResult[field])];
+          this.formState.tempSuitability = nextArr;
+          const groupEl = this.container.querySelector(`.pill-selector[data-field="tempSuitability"]`);
+          if (groupEl) {
+            groupEl.querySelectorAll('.pill-btn[data-val]').forEach((btn) => {
+              btn.classList.toggle('active', nextArr.includes(btn.dataset.val));
+            });
+          }
+        } else if (field === 'delicate') {
+          const careVal = tagResult.delicate ? 'delicate' : 'other';
+          this.formState.careCategory = careVal;
+          this.formState.delicate = Boolean(tagResult.delicate);
+          const groupEl = this.container.querySelector(`.pill-selector[data-field="careCategory"]`);
+          if (groupEl) {
+            groupEl.querySelectorAll('.pill-btn[data-val]').forEach((btn) => {
+              btn.classList.toggle('active', btn.dataset.val === careVal);
+            });
+          }
+        } else {
+          this.formState[field] = tagResult[field];
+          const groupEl = this.container.querySelector(`.pill-selector[data-field="${field}"]`);
+          if (groupEl) {
+            groupEl.querySelectorAll('.pill-btn[data-val]').forEach((btn) => {
+              btn.classList.toggle('active', btn.dataset.val === String(tagResult[field]));
+            });
+          }
+        }
+      }
+    });
+  }
+
+  async autoGenerateDescriptionFromMedia() {
+    if (!this.photoFile && !this.videoFile) return;
+    try {
+      const settings = await wardrobeDb.getSettings();
+      const { visualDescription, tagResult } = await generateGarmentMetadataDescription(
+        this.formState,
+        this.photoFile,
+        settings.geminiApiKey || '',
+        this.videoFile
+      );
+      if (tagResult) {
+        this.applyAiTagResult({ ...tagResult, visualDescription }, { overwriteUserPills: false });
+      } else if (visualDescription && this.container) {
+        const descInput = this.container.querySelector('#garment-desc-input');
+        if (descInput && !descInput.value.trim()) {
+          descInput.value = visualDescription;
+          this.formState.visualDescription = visualDescription;
+        }
+      }
+    } catch (_) {
+      // Final fallback runs on form submit
+    }
   }
 
   bindEvents() {
@@ -192,7 +359,7 @@ export class AddGarmentView {
     this.container.querySelectorAll('.pill-selector').forEach((groupEl) => {
       const field = groupEl.dataset.field;
       const isMulti = groupEl.dataset.multi === 'true' || field === 'tempSuitability';
-      groupEl.querySelectorAll('.pill-btn').forEach((btn) => {
+      groupEl.querySelectorAll('.pill-btn[data-val]').forEach((btn) => {
         btn.addEventListener('click', () => {
           const rawVal = btn.dataset.val;
           if (isMulti) {
@@ -217,14 +384,97 @@ export class AddGarmentView {
             }
 
             this.formState[field] = current;
-            groupEl.querySelectorAll('.pill-btn').forEach((b) => {
+            groupEl.querySelectorAll('.pill-btn[data-val]').forEach((b) => {
               b.classList.toggle('active', current.includes(b.dataset.val));
             });
           } else {
-            this.formState[field] = field === 'delicate' ? rawVal === 'true' : rawVal;
-            groupEl.querySelectorAll('.pill-btn').forEach((b) => b.classList.toggle('active', b === btn));
+            this.formState[field] = rawVal;
+            if (field === 'careCategory') {
+              this.formState.delicate = normalizeCategoryValue(rawVal) === 'delicate';
+            }
+            groupEl.querySelectorAll('.pill-btn[data-val]').forEach((b) => b.classList.toggle('active', b === btn));
           }
         });
+      });
+    });
+
+    // Toggle inline input for adding a custom category
+    this.container.querySelectorAll('[data-toggle-add-cat]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const groupKey = btn.dataset.toggleAddCat;
+        const row = this.container.querySelector(`[data-add-cat-row="${groupKey}"]`);
+        if (row) {
+          row.classList.toggle('hidden');
+          const input = row.querySelector(`[data-cat-input="${groupKey}"]`);
+          if (input && !row.classList.contains('hidden')) {
+            input.focus();
+          }
+        }
+      });
+    });
+
+    // Confirm adding a custom category
+    const handleAddCategory = async (groupKey, fieldName) => {
+      const input = this.container.querySelector(`[data-cat-input="${groupKey}"]`);
+      const rawLabel = String(input?.value || '').trim();
+      if (!rawLabel) return;
+      this.syncInputsToFormState();
+      const added = await wardrobeDb.addCategoryOption(groupKey, rawLabel);
+      if (added) {
+        this.customCategories[groupKey] = added.list;
+        this.formState[fieldName] = added.value;
+        if (fieldName === 'careCategory') {
+          this.formState.delicate = added.value === 'delicate';
+        }
+        eventBus.emit('categories:changed', { groupKey, list: added.list });
+        showToast(`Added "${formatCategoryLabel(added.value)}" category`, 'success');
+        this.render();
+      }
+    };
+
+    this.container.querySelectorAll('[data-confirm-add-cat]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        handleAddCategory(btn.dataset.confirmAddCat, btn.dataset.field);
+      });
+    });
+
+    this.container.querySelectorAll('[data-cat-input]').forEach((input) => {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const groupKey = input.dataset.catInput;
+          const confirmBtn = this.container.querySelector(`[data-confirm-add-cat="${groupKey}"]`);
+          if (confirmBtn) {
+            handleAddCategory(groupKey, confirmBtn.dataset.field);
+          }
+        }
+      });
+    });
+
+    // Remove a category option
+    this.container.querySelectorAll('[data-remove-cat]').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const groupKey = btn.dataset.catGroup;
+        const fieldName = btn.dataset.field;
+        const catToRemove = btn.dataset.removeCat;
+        const currentList = this.customCategories[groupKey] || [];
+        if (currentList.length <= 1) {
+          showToast('Keep at least one category in this group, or add another first.', 'info');
+          return;
+        }
+        this.syncInputsToFormState();
+        const updatedList = await wardrobeDb.removeCategoryOption(groupKey, catToRemove);
+        this.customCategories[groupKey] = updatedList;
+        if (normalizeCategoryValue(this.formState[fieldName]) === normalizeCategoryValue(catToRemove)) {
+          this.formState[fieldName] = updatedList[0] || '';
+          if (fieldName === 'careCategory') {
+            this.formState.delicate = normalizeCategoryValue(this.formState.careCategory) === 'delicate';
+          }
+        }
+        eventBus.emit('categories:changed', { groupKey, list: updatedList });
+        showToast(`Removed "${formatCategoryLabel(catToRemove)}" category`, 'info');
+        this.render();
       });
     });
 
@@ -249,6 +499,7 @@ export class AddGarmentView {
       const file = e.target.files?.[0];
       if (!file) return;
       this.photoFile = file;
+      this.lastAiTagResult = null;
       const previewUrl = this.urlManager.createUrl(file);
       if (photoPreview) {
         photoPreview.innerHTML = `<img src="${previewUrl}" alt="Selected Garment Preview" class="upload-preview-img" />`;
@@ -264,6 +515,7 @@ export class AddGarmentView {
       const file = e.target.files?.[0];
       if (!file) return;
       this.videoFile = file;
+      this.lastAiTagResult = null;
       const videoUrl = this.urlManager.createUrl(file);
       if (videoPreview) {
         videoPreview.innerHTML = '';
@@ -274,7 +526,7 @@ export class AddGarmentView {
       updateAutoTagButtonState();
     });
 
-    // AI Auto-Tag button
+    // AI Auto-Tag button (optional preview before saving; cached so Save does not re-call AI)
     autoTagBtn?.addEventListener('click', async () => {
       if (!this.photoFile && !this.videoFile) return;
       try {
@@ -289,37 +541,8 @@ export class AddGarmentView {
           settings.geminiApiKey || '',
           this.videoFile
         );
-
-        // Populate form fields
-        const nameInput = this.container.querySelector('#garment-name-input');
-        const descInput = this.container.querySelector('#garment-desc-input');
-        if (nameInput && tagResult.name) nameInput.value = tagResult.name;
-        if (descInput && tagResult.visualDescription) descInput.value = tagResult.visualDescription;
-
-        ['category', 'season', 'tempSuitability', 'layerRole', 'colorGroup', 'delicate', 'type'].forEach((field) => {
-          if (tagResult[field] !== undefined) {
-            if (field === 'tempSuitability') {
-              const nextArr = Array.isArray(tagResult[field])
-                ? tagResult[field]
-                : [String(tagResult[field])];
-              this.formState.tempSuitability = nextArr;
-              const groupEl = this.container.querySelector(`.pill-selector[data-field="tempSuitability"]`);
-              if (groupEl) {
-                groupEl.querySelectorAll('.pill-btn').forEach((btn) => {
-                  btn.classList.toggle('active', nextArr.includes(btn.dataset.val));
-                });
-              }
-            } else {
-              this.formState[field] = tagResult[field];
-              const groupEl = this.container.querySelector(`.pill-selector[data-field="${field}"]`);
-              if (groupEl) {
-                groupEl.querySelectorAll('.pill-btn').forEach((btn) => {
-                  btn.classList.toggle('active', btn.dataset.val === String(tagResult[field]));
-                });
-              }
-            }
-          }
-        });
+        this.lastAiTagResult = tagResult;
+        this.applyAiTagResult(tagResult, { overwriteUserPills: true });
 
         showToast(
           tagResult.engine === 'gemini'
@@ -336,7 +559,7 @@ export class AddGarmentView {
       }
     });
 
-    // Form submission
+    // Form submission — single optimized AI call on save to generate AI metadata & attributes
     const form = this.container.querySelector('#add-garment-form');
     form?.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -345,12 +568,39 @@ export class AddGarmentView {
 
       const garmentData = {
         ...this.formState,
-        name: String(nameInput?.value || '').trim() || 'Untitled Garment',
+        delicate: normalizeCategoryValue(this.formState.careCategory) === 'delicate',
+        name: String(nameInput?.value || '').trim(),
         visualDescription: String(descInput?.value || '').trim()
       };
 
       try {
-        LoadingOverlay.show('Saving garment & media to your phone...');
+        LoadingOverlay.show('Generating AI metadata & saving garment...');
+        if (!garmentData.visualDescription) {
+          if (this.lastAiTagResult && this.lastAiTagResult.visualDescription) {
+            garmentData.visualDescription = this.lastAiTagResult.visualDescription;
+            if (!garmentData.name && this.lastAiTagResult.name) {
+              garmentData.name = this.lastAiTagResult.name;
+            }
+          } else {
+            const settings = await wardrobeDb.getSettings();
+            const { visualDescription, tagResult } = await generateGarmentMetadataDescription(
+              garmentData,
+              this.photoFile,
+              settings.geminiApiKey || '',
+              this.videoFile
+            );
+            this.lastAiTagResult = tagResult;
+            garmentData.visualDescription = visualDescription;
+            if (!garmentData.name && tagResult?.name) {
+              garmentData.name = tagResult.name;
+            }
+          }
+          if (descInput) descInput.value = garmentData.visualDescription;
+        }
+        if (!garmentData.name) {
+          garmentData.name = 'Untitled Garment';
+        }
+
         const saved = await wardrobeDb.saveGarment(garmentData, this.photoFile, this.videoFile);
         eventBus.emit('wardrobe:changed', { garment: saved });
         if (saved.status === 'to_wash') {
