@@ -431,7 +431,7 @@ export class AddGarmentView {
       };
 
       try {
-        LoadingOverlay.show('Generating AI metadata description & saving garment...');
+        LoadingOverlay.show('Saving');
         const settings = await wardrobeDb.getSettings();
         const { visualDescription } = await generateGarmentMetadataDescription(
           garmentData,
