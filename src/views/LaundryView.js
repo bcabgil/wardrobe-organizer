@@ -89,19 +89,10 @@ export class LaundryView {
         );
         const lLabel = formatCategoryLabel(normL);
         const cLabel = formatCategoryLabel(normC);
-        const icon =
-          normC === 'delicate'
-            ? '🫧'
-            : normL === 'whites'
-              ? '⚪'
-              : normL === 'coloured'
-                ? '🎨'
-                : '🧺';
         const basket = {
           key,
           title: `${lLabel} — ${cLabel} Load`,
           subtitle: `${lLabel} garments with ${cLabel.toLowerCase()} care`,
-          icon,
           items
         };
         baskets.push(basket);
@@ -145,7 +136,7 @@ export class LaundryView {
           <div class="laundry-basket-card card-surface" data-basket="${b.key}">
             <div class="laundry-basket-header">
               <div>
-                <h3 class="laundry-basket-title">${b.icon} ${escapeHtml(b.title)} <span class="basket-count-pill">${count}</span></h3>
+                <h3 class="laundry-basket-title">${escapeHtml(b.title)} <span class="basket-count-pill">${count}</span></h3>
                 <p class="laundry-basket-sub">${escapeHtml(b.subtitle)}</p>
               </div>
               <button type="button" class="btn-primary btn-clean-load" data-clean-basket="${b.key}" ${count === 0 ? 'disabled' : ''}>
